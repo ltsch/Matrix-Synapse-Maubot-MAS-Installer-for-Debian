@@ -1,0 +1,6 @@
+maubot[postgres]
+python-olm
+unpaddedbase64
+pycryptodome
+base58
+sqlalchemy<2.0
