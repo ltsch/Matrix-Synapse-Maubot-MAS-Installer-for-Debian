@@ -1,0 +1,25 @@
+# Matrix Services Installation Configuration
+# Copy this file to 'setup.config' and edit before running install-service-improved.sh
+
+# --- Required Public Settings ---
+# The fully qualified domain name your users will access (e.g., chat.example.com)
+MATRIX_FQDN="chat.example.com"
+
+# Email for critical admin notifications (and potentially Let's Encrypt)
+ADMIN_EMAIL="admin@example.com"
+
+# The password for the initial @admin:FOO user.
+# If left empty, one will be generated for you.
+ADMIN_PASS="ChangeMeToSomethingSecure123!"
+
+# --- Optional Technical Settings (Auto-generated if omitted) ---
+# Database Name for Synapse
+# DB_NAME="synapse_db"
+
+# Database User for Synapse
+# DB_USER="synapse_user"
+
+# Secrets (Will be secure random hex if not provided)
+# DB_PASS=""
+# MAUBOT_DB_PASS=""
+# TURN_SECRET=""
