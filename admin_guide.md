@@ -15,6 +15,25 @@ This document is a comprehensive reference for managing the [chat.example.com](f
 | **Synapse Admin** | `nginx` | `443` | Static web UI for Synapse administration. |
 | **MAS** | `mas` | `8080`, `8082` | Matrix Authentication Service (OIDC Provider). Runs as `mas` user. |
 
+## MAS Implementation Details
+The Matrix Authentication Service (MAS) is the OIDC provider for this server, enabling modern login flows. **Note that MAS is NOT currently installed by the `install-service-improved.sh` script** and must be deployed manually.
+
+### 1. Requirements
+- **Subdomain**: You MUST configure a dedicated subdomain `auth.<your-domain>` (e.g., `auth.chat.example.com`) pointing to this server.
+- **Reverse Proxy**: Nginx must proxy `auth.<your-domain>` requests to the MAS port (usually 8080). *The install-service-improved.sh script DOES generate this Nginx config for you.*
+
+### 2. Manual Installation Summary
+Since the installer skips this step, here is the manual implementation reference:
+1.  **Binary**: Download the latest release from `element-hq/matrix-authentication-service` and place it at `/opt/mas/mas`.
+2.  **User**: Create a dedicated `mas` system user.
+3.  **Config**: Create `/opt/mas/config.yaml` (see [Configuration Files](#configuration-files)).
+4.  **Database**: Setup a PostgreSQL database/user (`mas_db`/`mas`) and run migrations (`/opt/mas/mas migrate`).
+5.  **Service**: Create `/etc/systemd/system/mas.service` and enable it.
+
+### 3. Integration
+- **Synapse**: Synapse delegates authentication to MAS via OIDC. This requires updating `homeserver.yaml` with the OIDC config values generated during MAS setup.
+- **Compatibility**: Nginx handles legacy login paths by proxying them to the MAS compatibility layer on port 8080.
+
 ## Configuration Files
 
 | Service | File Path | Key Notes |
