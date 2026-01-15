@@ -205,6 +205,35 @@ A: When a **new user** signs in with Google for the first time:
 ```
 *After editing, restart the service: `systemctl restart mas`.*
 
+### 12. Service Monitoring
+A dedicated script `/root/monitor_services.sh` is available to check the health of systemd services and HTTP endpoints.
+
+**Features:**
+- **Silent on Success**: Produces no output if systems are healthy (ideal for cron).
+- **Alerting**: Sends JSON payloads to a configured Webhook (Discord/Slack/Matrix) on failure.
+- **Test Mode**: Run with `--test` to verify your webhook configuration.
+
+**Setup (Cron):**
+Add the following to root's crontab (`crontab -e`) to run every 5 minutes:
+```bash
+*/5 * * * * /root/monitor_services.sh >> /var/log/matrix_monitor.log 2>&1
+```
+
+**Manual Usage:**
+```bash
+# Normal check (silent if OK)
+/root/monitor_services.sh
+
+# Force a test alert
+/root/monitor_services.sh --test
+```
+
+**Configuration:**
+The Webhook URL is loaded from `/root/setup.config`:
+```bash
+MONITOR_WEBHOOK_URL="https://discord.com/api/..."
+```
+
 ## Important Scripts
 
 - **`/root/install-service-improved.sh`**: The master installation script. Contains logic for a complete rebuild. Now interactive (prompts for FQDN, passwords) but can be automated via `setup.config`.

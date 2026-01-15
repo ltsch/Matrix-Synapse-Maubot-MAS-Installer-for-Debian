@@ -18,6 +18,9 @@ ADMIN_PASS="ChangeMeToSomethingSecure123!"
 # If unset, the script will prompt you interactively.
 # INSTALL_REGISTRATION="true"
 
+# Optional Discord Webhook integration for the monitor_services.sh script
+# MONITOR_WEBHOOK_URL="https://discord.com/api/webhooks/..."
+
 # --- Optional Technical Settings (Auto-generated if omitted) ---
 # Database Name for Synapse
 # DB_NAME="synapse_db"

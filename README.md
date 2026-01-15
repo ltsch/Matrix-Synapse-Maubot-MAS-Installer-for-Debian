@@ -7,6 +7,7 @@ A comprehensive, opinionated installation script for setting up a full-featured 
 - **Client**: Element Web.
 - **VoIP**: Coturn (STUN/TURN) configured for standard and TLS media.
 - **Bots**: Maubot framework with virtualization.
+- **Monitoring**: Automated health checks with Discord/Webhook alerting.
 - **Utilities**: Interactive installation or config-file driven for automation.
 
 ## ⚠️ Requirements & Warnings
