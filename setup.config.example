@@ -12,6 +12,12 @@ ADMIN_EMAIL="admin@example.com"
 # If left empty, one will be generated for you.
 ADMIN_PASS="ChangeMeToSomethingSecure123!"
 
+# --- Feature Flags ---
+# Set to "true" to install the custom registration portal (app.py).
+# Set to "false" to skip it.
+# If unset, the script will prompt you interactively.
+# INSTALL_REGISTRATION="true"
+
 # --- Optional Technical Settings (Auto-generated if omitted) ---
 # Database Name for Synapse
 # DB_NAME="synapse_db"

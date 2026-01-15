@@ -51,7 +51,7 @@ server:
     hostname: 127.0.0.1
     port: 29316
     # Public base URL where the server is visible.
-    public_url: https://chat.minn.info
+    public_url: https://chat.example.com
     # The base path for the UI. Note that this does not change the API path.
     # Add a path prefix to public_url if you want everything on a subpath.
     ui_base_path: /_matrix/maubot
@@ -69,8 +69,8 @@ server:
 # clients in the management UI, since you can also just type the homeserver URL
 # into the box there.
 homeservers:
-    chat.minn.info:
-        url: https://chat.minn.info
+    chat.example.com:
+        url: https://chat.example.com
 
 admins:
     admin: $2b$12$ZVWmH2mQgMdUzGsKvLEQju/S6bi0Gg.WmohVOdmcrpxoLkZ2ngjgW

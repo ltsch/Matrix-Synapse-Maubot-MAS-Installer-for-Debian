@@ -1,6 +1,6 @@
 # System Administration Guide
 
-This document is a comprehensive reference for managing the [chat.minn.info](file:///etc/nginx/sites-available/chat.minn.info) Matrix server stack.
+This document is a comprehensive reference for managing the [chat.example.com](file:///etc/nginx/sites-available/chat.example.com) Matrix server stack.
 
 ## Service Overview
 
@@ -15,17 +15,36 @@ This document is a comprehensive reference for managing the [chat.minn.info](fil
 | **Synapse Admin** | `nginx` | `443` | Static web UI for Synapse administration. |
 | **MAS** | `mas` | `8080`, `8082` | Matrix Authentication Service (OIDC Provider). Runs as `mas` user. |
 
+## MAS Implementation Details
+The Matrix Authentication Service (MAS) is the OIDC provider for this server, enabling modern login flows. **Note that MAS is NOT currently installed by the `install-service-improved.sh` script** and must be deployed manually.
+
+### 1. Requirements
+- **Subdomain**: You MUST configure a dedicated subdomain `auth.<your-domain>` (e.g., `auth.chat.example.com`) pointing to this server.
+- **Reverse Proxy**: Nginx must proxy `auth.<your-domain>` requests to the MAS port (usually 8080). *The install-service-improved.sh script DOES generate this Nginx config for you.*
+
+### 2. Manual Installation Summary
+Since the installer skips this step, here is the manual implementation reference:
+1.  **Binary**: Download the latest release from `element-hq/matrix-authentication-service` and place it at `/opt/mas/mas`.
+2.  **User**: Create a dedicated `mas` system user.
+3.  **Config**: Create `/opt/mas/config.yaml` (see [Configuration Files](#configuration-files)).
+4.  **Database**: Setup a PostgreSQL database/user (`mas_db`/`mas`) and run migrations (`/opt/mas/mas migrate`).
+5.  **Service**: Create `/etc/systemd/system/mas.service` and enable it.
+
+### 3. Integration
+- **Synapse**: Synapse delegates authentication to MAS via OIDC. This requires updating `homeserver.yaml` with the OIDC config values generated during MAS setup.
+- **Compatibility**: Nginx handles legacy login paths by proxying them to the MAS compatibility layer on port 8080.
+
 ## Configuration Files
 
 | Service | File Path | Key Notes |
 | :--- | :--- | :--- |
 | **Synapse** | [/etc/matrix-synapse/homeserver.yaml](file:///etc/matrix-synapse/homeserver.yaml) | Main config (DB, paths, listeners). |
 | **Synapse** | `/etc/matrix-synapse/conf.d/` | Override files (`server_name.yaml`, `registration.yaml`). |
-| **Nginx** | `/etc/nginx/sites-available/chat.minn.info` | Reverse proxy config. Handles `/`, `/_matrix`, `/_synapse`, etc. |
+| **Nginx** | `/etc/nginx/sites-available/chat.example.com` | Reverse proxy config. Handles `/`, `/_matrix`, `/_synapse`, etc. |
 | **Coturn** | `/etc/turnserver.conf` | TURN server setup, secrets, and TLS paths. |
 | **Maubot** | `/opt/maubot/config.yaml` | Database URI, Admin user, Listen port. |
 | **Registration** | `/opt/matrix-registration/app.py` | Flask source (binds to localhost, reads Synapse config). |
-| **Element Web** | `/var/www/element-web/config.json` | Client config (points to `https://chat.minn.info`). |
+| **Element Web** | `/var/www/element-web/config.json` | Client config (points to `https://chat.example.com`). |
 | **MAS** | `/opt/mas/config.yaml` | MAS Config (DB, Secrets, Synapse Integration). |
 
 ## Common Tasks
@@ -65,30 +84,30 @@ Certificates are fetched from Caddy via the refresh script. This is typically au
 ```
 
 ### 5. Managing Maubot
-- **Web UI**: [https://chat.minn.info/_matrix/maubot/](https://chat.minn.info/_matrix/maubot/)
+- **Web UI**: [https://chat.example.com/_matrix/maubot/](https://chat.example.com/_matrix/maubot/)
 - **Virtual Environment**: `/opt/maubot/venv`
 - **Plugin Management**: Install plugins via the Web UI to ensure they are properly registered.
 
 ### 6. Managing Users
-- **Create User**: Visit [https://chat.minn.info/register](https://chat.minn.info/register)
+- **Create User**: Visit [https://chat.example.com/register](https://chat.example.com/register)
 - **Promote to Admin** (SQL):
   ```bash
-  sudo -u postgres psql -d synapse_db -c "UPDATE users SET admin = 1 WHERE name = '@username:chat.minn.info';"
+  sudo -u postgres psql -d synapse_db -c "UPDATE users SET admin = 1 WHERE name = '@username:chat.example.com';"
   ```
 
 ### Synapse Admin Config
-The Synapse Admin UI is available at `https://chat.minn.info/synapse-admin`.
+The Synapse Admin UI is available at `https://chat.example.com/synapse-admin`.
 
 **Important Login Instructions:**
 `synapse-admin` is a legacy application and does not support the new OIDC/SSO Native login flow natively.
 To log in:
 1.  Ensure you are using the **Password** login field (not "Sign in with SSO").
-2.  Use your username (e.g., `@admin:chat.minn.info`) and your MAS password.
+2.  Use your username (e.g., `@admin:chat.example.com`) and your MAS password.
 3.  *Note:* We have configured Nginx to transparently proxy these password requests to the MAS compatibility layer.
 
 ### 7. Synapse Admin UI
-- **URL**: [https://chat.minn.info/synapse-admin](https://chat.minn.info/synapse-admin)
-- **Log in**: Use your Matrix admin ID (`@user:chat.minn.info`) and password.
+- **URL**: [https://chat.example.com/synapse-admin](https://chat.example.com/synapse-admin)
+- **Log in**: Use your Matrix admin ID (`@user:chat.example.com`) and password.
 - **Features**: Manage users, rooms, media, and server configuration visually.
 
 ### 8. Security Recommendations
@@ -107,7 +126,7 @@ respond @admin_restricted 403
 ```
 
 **Option B: Nginx (Local)**
-To enforce this on the local Nginx server, add `allow` and `deny` rules to the `/synapse-admin` and `/_synapse/admin` blocks in `/etc/nginx/sites-available/chat.minn.info`:
+To enforce this on the local Nginx server, add `allow` and `deny` rules to the `/synapse-admin` and `/_synapse/admin` blocks in `/etc/nginx/sites-available/chat.example.com`:
 ```nginx
 location /synapse-admin {
     allow 192.168.0.0/16;
@@ -129,7 +148,7 @@ location /synapse-admin {
 By default, public registration is **disabled**.
 
 **To Invite Users via Web UI:**
-1.  Navigate to [https://chat.minn.info/register](https://chat.minn.info/register).
+1.  Navigate to [https://chat.example.com/register](https://chat.example.com/register).
 2.  **Login** (Protected by Caddy basic auth or similar, if configured).
 3.  Click "Generate Invite Token".
 4.  Copy the link and send it to your user.
@@ -140,8 +159,8 @@ By default, public registration is **disabled**.
 ```
 
 ### 11. FAQ / Troubleshooting
-**Q: Why does `auth.chat.minn.info` show a "Discovery" page?**
-A: This is normal. `auth.chat.minn.info` is the **Identity Provider**. It doesn't have a "home" page for users because its job is to handle logins *for other apps* (like Element).
+**Q: Why does `auth.chat.example.com` show a "Discovery" page?**
+A: This is normal. `auth.chat.example.com` is the **Identity Provider**. It doesn't have a "home" page for users because its job is to handle logins *for other apps* (like Element).
 - The "Sign In" button there takes you to your **Account Management** page.
 - The "OpenID Connect discovery document" link is used by apps (like Element) to automatically find the login servers.
 
@@ -164,14 +183,14 @@ upstream_oauth2:
 **Redirect URI / Callback URL:**
 The Callback URL must include the **Provider ID**, which **MUST be a ULID** (26-character string) defined in your config.
 For the configuration I just set up, the URL is:
-`https://auth.chat.minn.info/upstream/callback/MNZXB3BSSBGC1ACK1FNPW3S63T`
+`https://auth.chat.example.com/upstream/callback/MNZXB3BSSBGC1ACK1FNPW3S63T`
 
 *(Note: If you change the `id` in `config.yaml`, this URL will change. The ID cannot be a simple word like `google`, it must be a valid ULID).*
 
 **Q: How do I link an existing Matrix account to Google?**
 A: **Do not** just sign in with Google seamlessly; that might create a *new* account if the emails don't match perfectly or if auto-linking isn't enabled.
 **The Safe Way:**
-1.  Go to `https://auth.chat.minn.info/account`.
+1.  Go to `https://auth.chat.example.com/account`.
 2.  Log in with your **username and password**.
 3.  Go to the **"Authentication"** or **"Cross-post / Social"** section (UI varies by version).
 4.  Click **"Connect"** next to Google.
@@ -181,7 +200,7 @@ A: **Do not** just sign in with Google seamlessly; that might create a *new* acc
 A: When a **new user** signs in with Google for the first time:
 1.  MAS verifies their email with Google.
 2.  MAS shows a **"Finish Registration"** screen.
-3.  The user **types their desired username** (e.g., `@alice:chat.minn.info`) and clicks "Create Account".
+3.  The user **types their desired username** (e.g., `@alice:chat.example.com`) and clicks "Create Account".
     *   *Note: If you have locked down registration (e.g., invites only), they might need an invite link to start this process, or you must enable public registration.*
 ```
 *After editing, restart the service: `systemctl restart mas`.*

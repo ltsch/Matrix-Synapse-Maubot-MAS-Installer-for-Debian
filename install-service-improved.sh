@@ -24,16 +24,30 @@ prompt_if_missing() {
     fi
 }
 
-# Load config file if it exists
+# Load config file
 if [ -f "setup.config" ]; then
     echo "Loading configuration from setup.config..."
     source setup.config
+else
+    echo "Error: setup.config not found!"
+    echo "Please copy setup.config.example to setup.config and edit it with your values."
+    exit 1
 fi
 
-echo "--- Configuration Setup ---"
-prompt_if_missing "MATRIX_FQDN" "Enter the fully qualified domain name (FQDN) for the Matrix server" "chat.minn.info"
-prompt_if_missing "ADMIN_EMAIL" "Enter email for admin user" "admin@${MATRIX_FQDN}"
-prompt_if_missing "ADMIN_PASS" "Enter admin password (leave empty to generate)" ""
+echo "--- Configuration Check ---"
+
+# Validate critical variables
+if [ -z "$MATRIX_FQDN" ]; then
+    echo "Error: MATRIX_FQDN is not set in setup.config."
+    exit 1
+fi
+
+if [ -z "$ADMIN_EMAIL" ]; then
+    echo "Error: ADMIN_EMAIL is not set in setup.config."
+    exit 1
+fi
+
+# ADMIN_PASS is optional; if empty, it will be generated below.
 
 if [ -z "$ADMIN_PASS" ]; then
     ADMIN_PASS=$(openssl rand -base64 18)
@@ -47,10 +61,25 @@ fi
 : ${MAUBOT_DB_PASS:="$(openssl rand -hex 16)"}
 : ${TURN_SECRET:="$(openssl rand -hex 32)"}
 
+# Check for Registration Portal install preference
+if [ -z "$INSTALL_REGISTRATION" ]; then
+    read -p "Do you want to install the custom registration portal? [y/N]: " reg_choice
+    case "$reg_choice" in
+        [yY][eE][sS]|[yY]) 
+            INSTALL_REGISTRATION="true" 
+            ;;
+        *) 
+            INSTALL_REGISTRATION="false" 
+            ;;
+    esac
+fi
+echo "Install Registration Portal: $INSTALL_REGISTRATION"
+
 echo "------------------------------------------------"
 echo "Configuration Summary:"
 echo "FQDN: $MATRIX_FQDN"
 echo "Database User: $DB_USER"
+echo "Install Registration: $INSTALL_REGISTRATION"
 echo "------------------------------------------------"
 read -p "Press Enter to continue or Ctrl+C to cancel..."
 
@@ -88,7 +117,9 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
 # 1.1 Create Service Users
 echo "Creating service users..."
 useradd -r -s /bin/false maubot || true
-useradd -r -s /bin/false matrix-reg || true
+if [ "$INSTALL_REGISTRATION" = "true" ]; then
+    useradd -r -s /bin/false matrix-reg || true
+fi
 
 # 2. Matrix Repository
 wget -O /usr/share/keyrings/matrix-org-archive-keyring.gpg https://packages.matrix.org/debian/matrix-org-archive-keyring.gpg
@@ -304,11 +335,27 @@ server {
     listen [::]:443 ssl;
     server_name $MATRIX_FQDN;
 
+    ssl on;
     ssl_certificate /etc/nginx/ssl/matrix.crt;
     ssl_certificate_key /etc/nginx/ssl/matrix.key;
 
+    # If you don't wanna serve a site, comment this out
     root /var/www/element-web;
     index index.html index.htm;
+
+    # Delegate legacy login and logout to MAS (compatibility layer for synapse-admin)
+    location ~ ^/_matrix/client/(r0|v3)/(login|logout)$ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Host \$host;
+        client_max_body_size 50M;
+    }
+
+    # Rewrite legacy r0 API calls to v3 for synapse-admin compatibility
+    location ~ ^/_matrix/client/r0/(.*)$ {
+        rewrite ^/_matrix/client/r0/(.*)$ /_matrix/client/v3/\$1 last;
+    }
 
     # Matrix Client API
     location /_matrix {
@@ -319,7 +366,7 @@ server {
         client_max_body_size 50M;
     }
 
-    # Synapse Client API
+    # Synapse Client API (needed for some features)
     location /_synapse/client {
         proxy_pass http://127.0.0.1:8008;
         proxy_set_header X-Forwarded-For \$remote_addr;
@@ -327,8 +374,66 @@ server {
         proxy_set_header Host \$host;
         client_max_body_size 50M;
     }
+
+    # Synapse Admin API (Required for synapse-admin)
+    location /_synapse/admin {
+        proxy_pass http://127.0.0.1:8008;
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Host \$host;
+        client_max_body_size 50M;
+    }
+
+    # Sliding Sync (MSC3575 & MSC4186) hosted by Synapse
+    location ~ ^/(client/|_matrix/client/unstable/org.matrix.msc3575/sync|_matrix/client/unstable/org.matrix.simplified_msc3575/sync) {
+        proxy_pass http://127.0.0.1:8008;
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Host \$host;
+        client_max_body_size 50M;
+    }
     
-    # Maubot Admin UI
+    # Well-known file for client discovery
+    location /.well-known/matrix/client {
+        return 200 '{"m.homeserver": {"base_url": "https://$MATRIX_FQDN"}, "org.matrix.msc3575.proxy": {"url": "https://$MATRIX_FQDN"}, "org.matrix.msc2965.authentication": {"issuer": "https://auth.$MATRIX_FQDN/", "account": "https://auth.$MATRIX_FQDN/account/"}}';
+        default_type application/json;
+        add_header Access-Control-Allow-Origin *;
+    }
+EOF
+
+# Conditionally Add Registration Page to Nginx
+if [ "$INSTALL_REGISTRATION" = "true" ]; then
+    cat >> /etc/nginx/sites-available/$MATRIX_FQDN <<EOF
+
+    # Custom Registration Page
+    location /register {
+        proxy_pass http://127.0.0.1:8081/;
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Host \$host;
+        client_max_body_size 50M;
+    } 
+EOF
+fi
+
+# Append remainder of Nginx Config
+cat >> /etc/nginx/sites-available/$MATRIX_FQDN <<EOF
+
+    # Well-known file for server discovery (Federation)
+    location /.well-known/matrix/server {
+        return 200 '{"m.server": "$MATRIX_FQDN:443"}';
+        default_type application/json;
+        add_header Access-Control-Allow-Origin *;
+    }
+
+    # Synapse Admin UI
+    location /synapse-admin {
+        alias /var/www/synapse-admin;
+        index index.html;
+        try_files \$uri \$uri/ /synapse-admin/index.html;
+    }
+
+    # Maubot Admin UI and API
     location /_matrix/maubot {
         proxy_pass http://127.0.0.1:29316;
         proxy_set_header X-Forwarded-For \$remote_addr;
@@ -337,19 +442,6 @@ server {
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
         client_max_body_size 50M;
-    }
-
-    # Well-known Discovery
-    location /.well-known/matrix/client {
-        return 200 '{"m.homeserver": {"base_url": "https://$MATRIX_FQDN"}, "org.matrix.msc3575.proxy": {"url": "https://$MATRIX_FQDN"}}';
-        default_type application/json;
-        add_header Access-Control-Allow-Origin *;
-    }
-
-    location /.well-known/matrix/server {
-        return 200 '{"m.server": "$MATRIX_FQDN:443"}';
-        default_type application/json;
-        add_header Access-Control-Allow-Origin *;
     }
 }
 EOF
@@ -362,30 +454,37 @@ systemctl restart matrix-synapse
 echo "Registering Admin..."
 # Sleep to ensure Synapse is up
 sleep 5
-# 11. Registration Page Setup (Optional)
-echo "Installing Registration Page..."
-mkdir -p /opt/matrix-registration
-chown matrix-reg:matrix-reg /opt/matrix-registration
-# (Assuming files are deployed manually or via git, skipping file creation for brevity in script)
-# (Assuming files are deployed manually or via git, skipping file creation for brevity in script)
-mkdir -p /opt/matrix-registration/venv
-if [ -f "/root/registration_requirements.txt" ]; then
-    echo "Installing Registration dependencies from /root/registration_requirements.txt..."
-    cp /root/registration_requirements.txt /opt/matrix-registration/requirements.txt
-    chown matrix-reg:matrix-reg /opt/matrix-registration/requirements.txt
-    
-    python3 -m venv /opt/matrix-registration/venv
-    /opt/matrix-registration/venv/bin/pip install -r /opt/matrix-registration/requirements.txt
-elif [ -f "/opt/matrix-registration/requirements.txt" ]; then
-    python3 -m venv /opt/matrix-registration/venv
-    /opt/matrix-registration/venv/bin/pip install -r /opt/matrix-registration/requirements.txt
-else
-    echo "WARNING: No requirements.txt found for Matrix Registration. Installing defaults."
-    python3 -m venv /opt/matrix-registration/venv
-    /opt/matrix-registration/venv/bin/pip install flask requests pyyaml
-fi
 
-cat > /etc/systemd/system/matrix-registration.service <<EOF
+# 11. Registration Page Setup (Optional)
+if [ "$INSTALL_REGISTRATION" = "true" ]; then
+    echo "Installing Registration Page..."
+    mkdir -p /opt/matrix-registration
+    chown matrix-reg:matrix-reg /opt/matrix-registration
+    echo "Deploying Registration App..."
+    if [ -d "registration" ]; then
+        cp -r registration/* /opt/matrix-registration/
+        chown -R matrix-reg:matrix-reg /opt/matrix-registration
+    else
+        echo "Warning: 'registration' directory not found in current path. Skipping file deployment."
+    fi
+    mkdir -p /opt/matrix-registration/venv
+    if [ -f "/root/registration_requirements.txt" ]; then
+        echo "Installing Registration dependencies from /root/registration_requirements.txt..."
+        cp /root/registration_requirements.txt /opt/matrix-registration/requirements.txt
+        chown matrix-reg:matrix-reg /opt/matrix-registration/requirements.txt
+        
+        python3 -m venv /opt/matrix-registration/venv
+        /opt/matrix-registration/venv/bin/pip install -r /opt/matrix-registration/requirements.txt
+    elif [ -f "/opt/matrix-registration/requirements.txt" ]; then
+        python3 -m venv /opt/matrix-registration/venv
+        /opt/matrix-registration/venv/bin/pip install -r /opt/matrix-registration/requirements.txt
+    else
+        echo "WARNING: No requirements.txt found for Matrix Registration. Installing defaults."
+        python3 -m venv /opt/matrix-registration/venv
+        /opt/matrix-registration/venv/bin/pip install flask requests pyyaml
+    fi
+
+    cat > /etc/systemd/system/matrix-registration.service <<EOF
 [Unit]
 Description=Matrix Registration Page
 After=network.target matrix-synapse.service
@@ -403,10 +502,13 @@ Environment=PYTHONUNBUFFERED=1
 WantedBy=multi-user.target
 EOF
 
-systemctl daemon-reload
-# Fix permissions
-chown -R matrix-reg:matrix-reg /opt/matrix-registration
-# systemctl enable --now matrix-registration  # Uncomment to auto-enable
+    systemctl daemon-reload
+    # Fix permissions
+    chown -R matrix-reg:matrix-reg /opt/matrix-registration
+    # systemctl enable --now matrix-registration  # Uncomment to auto-enable
+else
+    echo "Skipping Registration Page installation as per configuration."
+fi
 
 echo ""
 echo "Installation Complete!"

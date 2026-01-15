@@ -1,0 +1,5 @@
+# Configuration for refresh_certs.sh
+# Copy this file to refresh_certs.conf and edit with your values.
+
+CERT_SOURCE_URL="http://192.168.x.x:8009/protected-certs"
+CERT_NAME="chat.example.com"

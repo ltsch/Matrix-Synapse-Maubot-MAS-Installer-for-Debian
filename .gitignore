@@ -1,5 +1,6 @@
 # Config and Secrets
 setup.config
+refresh_certs.conf
 *.pem
 *.key
 *.crt

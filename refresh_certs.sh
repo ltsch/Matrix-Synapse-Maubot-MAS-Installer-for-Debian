@@ -1,10 +1,39 @@
 #!/bin/bash
 set -e
 
+# ==============================================================================
+# Certificate Refresh Script
+# ==============================================================================
+# Context:
+# This script is responsible for pulling TLS certificates from a remote source
+# rather than generating them locally (e.g., via Certbot).
+#
+# Reason:
+# - The certificates are managed by a central Caddy instance on a different machine
+#   (192.168.x.x) which acts as the edge reverse proxy/CA manager.
+# - Caddy certificates often have short lifetimes (internal CA or Let's Encrypt),
+#   requiring frequent automated refreshing.
+#
+# Logic:
+# 1. Downloads the latest certs from the internal protected endpoint.
+# 2. Compares them against the currently installed certificates.
+# 3. If standard system services (Nginx, Coturn) need updates, it replaces the
+#    old files and reloads the services.
+# ==============================================================================
+
 # Configuration
-# Adapting for LXC environment (chat.minn.info)
-CERT_SOURCE_URL="http://192.168.0.25:8009/protected-certs" 
-CERT_NAME="chat.minn.info"
+# ==============================================================================
+# Load configuration from external file
+CONFIG_FILE="$(dirname "$0")/refresh_certs.conf"
+
+if [ -f "$CONFIG_FILE" ]; then
+    source "$CONFIG_FILE"
+else
+    echo "Error: Configuration file $CONFIG_FILE not found."
+    echo "Please copy refresh_certs.conf.example to refresh_certs.conf and edit usage."
+    exit 1
+fi
+
 DEST_DIR="/etc/nginx/ssl"
 TEMP_DIR=$(mktemp -d)
 

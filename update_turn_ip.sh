@@ -5,11 +5,11 @@
 
 set -e
 
-# Fetch Public IP via DNS (home.minn.info)
-PUBLIC_IP=$(dig +short home.minn.info | head -n 1)
+# Fetch Public IP via DNS (home.example.com)
+PUBLIC_IP=$(dig +short home.example.com | head -n 1)
 
 if [[ -z "$PUBLIC_IP" ]]; then
-    echo "Failed to resolve home.minn.info, trying fallback..."
+    echo "Failed to resolve home.example.com, trying fallback..."
     PUBLIC_IP=$(curl -s -4 https://ifconfig.me)
 fi
 
