@@ -60,6 +60,8 @@ fi
 : ${DB_PASS:="$(openssl rand -hex 16)"}
 : ${MAUBOT_DB_PASS:="$(openssl rand -hex 16)"}
 : ${TURN_SECRET:="$(openssl rand -hex 32)"}
+: ${MAUBOT_PICKLE_KEY:="$(openssl rand -hex 32)"}
+: ${MAUBOT_ADMIN_PASS:="$(openssl rand -hex 16)"}
 
 # Check for Registration Portal install preference
 if [ -z "$INSTALL_REGISTRATION" ]; then
@@ -249,7 +251,7 @@ mkdir -p /opt/maubot/venv/lib/python3.11/site-packages/maubot/plugins
 
 cat > /opt/maubot/config.yaml <<EOF
 database: postgresql://maubot:$MAUBOT_DB_PASS@localhost/maubot_db
-crypto_db_pickle_key: "change_me_to_random_string"
+crypto_db_pickle_key: "$MAUBOT_PICKLE_KEY"
 plugin_directories:
     upload: /opt/maubot/plugins
     load:
@@ -267,7 +269,7 @@ homeservers:
     $MATRIX_FQDN:
         url: https://$MATRIX_FQDN
 admins:
-    admin: "maubotadminpassword"
+    admin: "$MAUBOT_ADMIN_PASS"
 api_features:
     login: true
     plugin: true
@@ -510,8 +512,51 @@ else
     echo "Skipping Registration Page installation as per configuration."
 fi
 
+
+# 12. Log Credentials
+CRED_FILE="/root/matrix_credentials.txt"
+echo "Logging credentials to $CRED_FILE..."
+
+cat > "$CRED_FILE" <<EOF
+================================================================
+Matrix Installation Credentials
+Date: $(date)
+FQDN: $MATRIX_FQDN
+================================================================
+
+--- Matrix Synapse ---
+Admin User: @admin:$MATRIX_FQDN
+Admin Pass: $ADMIN_PASS
+Registration Secret: $REG_SECRET
+Database User: $DB_USER
+Database Pass: $DB_PASS
+Turn Secret: $TURN_SECRET
+
+--- Maubot ---
+DB Password: $MAUBOT_DB_PASS
+Pickle Key: $MAUBOT_PICKLE_KEY
+Admin User: admin
+Admin Pass: $MAUBOT_ADMIN_PASS
+
+--- URLs ---
+Homeserver: https://$MATRIX_FQDN
+Element Web: https://$MATRIX_FQDN
+Maubot UI: https://$MATRIX_FQDN/_matrix/maubot
+Synapse Admin UI: https://$MATRIX_FQDN/synapse-admin
+EOF
+
+if [ "$INSTALL_REGISTRATION" = "true" ]; then
+    cat >> "$CRED_FILE" <<EOF
+Registration Page: https://$MATRIX_FQDN/register
+EOF
+fi
+
+chmod 600 "$CRED_FILE"
+
 echo ""
 echo "Installation Complete!"
 echo "Server: https://$MATRIX_FQDN"
 echo "Admin User: @admin:$MATRIX_FQDN"
 echo "Maubot UI: https://$MATRIX_FQDN/_matrix/maubot"
+echo "CREDENTIALS SAVED TO: $CRED_FILE"
+
