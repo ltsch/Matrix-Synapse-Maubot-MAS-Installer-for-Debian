@@ -47,8 +47,8 @@ trap cleanup EXIT
 
 echo "Fetching certificate for $CERT_NAME..."
 # Download to tempdir first
-curl -m 5 -s -f -o "$TEMP_DIR/matrix.crt" "$CERT_SOURCE_URL/$CERT_NAME.crt"
-curl -m 5 -s -f -o "$TEMP_DIR/matrix.key" "$CERT_SOURCE_URL/$CERT_NAME.key"
+curl -m 10 -sS -f -o "$TEMP_DIR/matrix.crt" "$CERT_SOURCE_URL/$CERT_NAME.crt"
+curl -m 10 -sS -f -o "$TEMP_DIR/matrix.key" "$CERT_SOURCE_URL/$CERT_NAME.key"
 
 # Verify files exist and are non-empty
 if [[ ! -s "$TEMP_DIR/matrix.crt" || ! -s "$TEMP_DIR/matrix.key" ]]; then
