@@ -32,3 +32,7 @@ ADMIN_PASS="ChangeMeToSomethingSecure123!"
 # DB_PASS=""
 # MAUBOT_DB_PASS=""
 # TURN_SECRET=""
+
+# Coturn external-ip sync (update_turn_ip.sh)
+TURN_DDNS_HOST="home.example.com"
+TURN_PRIVATE_IP="192.168.1.100"
