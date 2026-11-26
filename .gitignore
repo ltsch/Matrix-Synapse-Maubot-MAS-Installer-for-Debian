@@ -1,54 +1,24 @@
-# Config and Secrets
+# This repository lives in /root, so ignore everything and allow-list project files.
+/*
+!/.gitignore
+!/README.md
+!/docs/
+!/lib/
+!/mas-invite/
+!/install.sh
+!/upgrade_services.sh
+!/backup_matrix.sh
+!/monitor_services.sh
+!/refresh_certs.sh
+!/update_turn_ip.sh
+!/manage_users.py
+!/maubot_requirements.txt
+!/setup.config.example
+!/refresh_certs.conf.example
+
+# Never commit site config or secrets, even inside allow-listed paths
 setup.config
 refresh_certs.conf
 *.pem
 *.key
-*.crt
-*.db
-mas_db_pass.txt
-mas_matrix_secret.txt
-synapse_client_secret.txt
-homeserver.yaml
-conf.d/
-turnserver.conf
-
-# Python / Venv
 __pycache__/
-*.pyc
-venv/
-.venv/
-.lint_venv/
-/opt/maubot/venv/
-/opt/matrix-registration/venv/
-
-# Build and Download
-*.tgz
-*.tar.gz
-element-*/
-/var/www/element-web/
-
-# Logs
-*.log
-
-# System & Environment (Root/Home Dir Noise)
-.antigravity-server/
-.gemini/
-.lint_venv/
-.cache/
-.config/
-.local/
-.gnupg/
-.ssh/
-.bash_history
-.bashrc
-.profile
-.lesshst
-.wget-hsts
-.selected_editor
-
-# Backups & Runtime Data
-synapse_db_backup_pre_mas.sql
-maubot/
-registration/
-archive/
-

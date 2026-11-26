@@ -12,12 +12,12 @@ set -euo pipefail
 
 # Site-specific values live in the git-ignored setup.config:
 #   TURN_DDNS_HOST="home.example.com"   # hostname that tracks the public IP
-#   TURN_PRIVATE_IP="192.168.x.x"       # coturn relay-ip (this container's LAN IP)
+#   LAN_IP="192.168.x.x"                # coturn relay-ip (this host's LAN IP)
 CONFIG_FILE="$(dirname "$(readlink -f "$0")")/setup.config"
 # shellcheck source=/dev/null
 [ -f "$CONFIG_FILE" ] && source "$CONFIG_FILE"
 DDNS_HOST="${TURN_DDNS_HOST:?set TURN_DDNS_HOST in setup.config}"
-PRIVATE_IP="${TURN_PRIVATE_IP:-$(grep -oP '^relay-ip=\K.*' /etc/turnserver.conf || true)}"
+PRIVATE_IP="${LAN_IP:-${TURN_PRIVATE_IP:-$(grep -oP '^relay-ip=\K.*' /etc/turnserver.conf || true)}}"
 CONF=/etc/turnserver.conf
 
 is_ipv4() { [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; }

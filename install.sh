@@ -1,0 +1,930 @@
+#!/bin/bash
+# install.sh - install the full Matrix stack on a fresh Debian 12 (bookworm) LXC/VM.
+#
+# Installs and wires together:
+#   Synapse (packages.matrix.org) + PostgreSQL (PGDG) + nginx (nginx.org mainline)
+#   Matrix Authentication Service (MAS)       - OIDC login, account management
+#   Element Web (+ embedded Element Call) and Synapse-Admin
+#   LiveKit SFU + lk-jwt-service               - MatrixRTC (Element Call / Element X calls)
+#   coturn (built from source)                 - TURN/STUN for legacy calls
+#   Maubot, MAS invite generator, monitoring/backup/cert/IP-sync cron jobs
+#
+# It assumes TLS is terminated by an edge reverse proxy (e.g. Caddy on the firewall)
+# that forwards HTTPS to this host with the original Host header. See
+# docs/INSTALL.md (prerequisites, firewall ports, edge proxy) and docs/ARCHITECTURE.md.
+#
+# Usage:
+#   ./install.sh                     # install (reads ./setup.config)
+#   ./install.sh --render-only DIR   # only write every config file under DIR (no system
+#                                    # changes) - for review/diffing against a live host
+#
+# Generated secrets are written to /root/matrix_credentials.txt (mode 600).
+
+set -euo pipefail
+HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+# shellcheck source=lib/common.sh
+source "$HERE/lib/common.sh"
+
+RENDER_DIR=""
+FORCE=false
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --render-only) RENDER_DIR=$(readlink -f "${2:?--render-only needs a directory}"); shift 2 ;;
+        --force)       FORCE=true; shift ;;
+        -h|--help)     sed -n '2,25p' "$0"; exit 0 ;;
+        *)             die "unknown argument: $1" ;;
+    esac
+done
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+[ -f "$HERE/setup.config" ] || die "setup.config not found - copy setup.config.example and edit it"
+# shellcheck source=/dev/null
+source "$HERE/setup.config"
+
+: "${MATRIX_FQDN:?set MATRIX_FQDN in setup.config}"
+: "${AUTH_FQDN:=auth.$MATRIX_FQDN}"
+: "${LAN_IP:=$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[0-9.]+' || true)}"
+: "${LAN_IP:?could not detect LAN_IP - set it in setup.config}"
+: "${EDGE_PROXY_IP:?set EDGE_PROXY_IP (the reverse proxy that forwards to this host) in setup.config}"
+: "${TURN_DDNS_HOST:?set TURN_DDNS_HOST (hostname resolving to your public IP) in setup.config}"
+: "${ADMIN_USER:=admin}"
+: "${ELEMENT_COUNTRY_CODE:=US}"
+: "${SMTP_HOST:=}" "${SMTP_PORT:=587}" "${SMTP_USER:=}" "${SMTP_PASS:=}" "${SMTP_FROM:=}" "${SMTP_REPLY_TO:=${SMTP_FROM}}"
+: "${MAPTILER_KEY:=}"
+
+# Public IP for coturn/LiveKit NAT mapping (kept current later by update_turn_ip.sh)
+if [ -z "${PUBLIC_IP:-}" ]; then
+    PUBLIC_IP=$(dig +short "$TURN_DDNS_HOST" A 2>/dev/null | grep -E '^[0-9.]+$' | tail -n1 || true)
+fi
+: "${PUBLIC_IP:?could not resolve TURN_DDNS_HOST - set PUBLIC_IP in setup.config}"
+
+# Secrets: generated on install; placeholders in --render-only mode unless provided
+# in the environment (lets you render with a live host's values to compare).
+secret() { # secret VAR bytes
+    if [ -n "${!1:-}" ]; then return; fi
+    if [ -n "$RENDER_DIR" ]; then printf -v "$1" '@%s@' "$1"; else printf -v "$1" '%s' "$(openssl rand -hex "$2")"; fi
+}
+for s in SYNAPSE_DB_PASS MAS_DB_PASS MAUBOT_DB_PASS MAUBOT_PICKLE_KEY MAUBOT_ADMIN_PASS LIVEKIT_SECRET; do secret "$s" 24; done
+for s in MAS_MATRIX_SECRET TURN_SECRET REG_SECRET AS_TOKEN HS_TOKEN MAUBOT_UNSHARED_SECRET; do secret "$s" 32; done
+: "${LIVEKIT_KEY:=API$( [ -n "$RENDER_DIR" ] && echo RENDER || openssl rand -hex 6)}"
+: "${ADMIN_PASS:=$( [ -n "$RENDER_DIR" ] && echo '@ADMIN_PASS@' || openssl rand -base64 18 | tr -d '/+=')}"
+
+export MATRIX_FQDN AUTH_FQDN LAN_IP EDGE_PROXY_IP PUBLIC_IP ELEMENT_COUNTRY_CODE \
+       SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASS SMTP_FROM SMTP_REPLY_TO \
+       SYNAPSE_DB_PASS MAUBOT_DB_PASS MAUBOT_PICKLE_KEY MAUBOT_ADMIN_PASS MAUBOT_UNSHARED_SECRET \
+       MAS_MATRIX_SECRET TURN_SECRET REG_SECRET AS_TOKEN HS_TOKEN LIVEKIT_KEY LIVEKIT_SECRET
+# Only these variables are substituted in templates (nginx's own $vars are left alone).
+SUBST_VARS='$MATRIX_FQDN $AUTH_FQDN $LAN_IP $EDGE_PROXY_IP $PUBLIC_IP $ELEMENT_COUNTRY_CODE
+$SMTP_HOST $SMTP_PORT $SMTP_USER $SMTP_PASS $SMTP_FROM $SMTP_REPLY_TO
+$SYNAPSE_DB_PASS $MAUBOT_DB_PASS $MAUBOT_PICKLE_KEY $MAUBOT_ADMIN_PASS $MAUBOT_UNSHARED_SECRET
+$MAS_MATRIX_SECRET $TURN_SECRET $REG_SECRET $AS_TOKEN $HS_TOKEN $LIVEKIT_KEY $LIVEKIT_SECRET'
+
+# put <path> <mode> <owner:group>  (template on stdin, ${VAR}s substituted)
+put() {
+    local dest=$1 mode=$2 owner=$3
+    if [ -n "$RENDER_DIR" ]; then dest="$RENDER_DIR$dest"; fi
+    mkdir -p "$(dirname "$dest")"
+    envsubst "$SUBST_VARS" > "$dest"
+    chmod "$mode" "$dest"
+    if [ -z "$RENDER_DIR" ]; then chown "$owner" "$dest"; fi
+}
+
+pyyaml() { # a python3 with PyYAML (system package on a real install)
+    if python3 -c 'import yaml' 2>/dev/null; then echo python3
+    elif [ -x /opt/venvs/matrix-synapse/bin/python ]; then echo /opt/venvs/matrix-synapse/bin/python
+    else die "PyYAML not available (apt install python3-yaml)"; fi
+}
+
+# ---------------------------------------------------------------------------
+# Config file templates
+# ---------------------------------------------------------------------------
+render_synapse() {
+    put /etc/matrix-synapse/homeserver.yaml 640 root:matrix-synapse <<'EOF'
+# Synapse homeserver configuration - managed by install.sh (see docs/ARCHITECTURE.md).
+# Reference: https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html
+server_name: ${MATRIX_FQDN}
+public_baseurl: https://${MATRIX_FQDN}/
+pid_file: "/var/run/matrix-synapse.pid"
+
+# Plain HTTP on localhost only; nginx (behind the edge proxy) terminates TLS.
+listeners:
+  - port: 8008
+    bind_addresses: ['127.0.0.1']
+    type: http
+    tls: false
+    x_forwarded: true
+    resources:
+      - names: [client, federation]
+        compress: false
+
+database:
+  name: psycopg2
+  args:
+    database: synapse_db
+    user: synapse_user
+    password: ${SYNAPSE_DB_PASS}
+    host: 127.0.0.1
+    cp_min: 5
+    cp_max: 10
+
+log_config: "/etc/matrix-synapse/log.yaml"
+media_store_path: /var/lib/matrix-synapse/media
+signing_key_path: "/etc/matrix-synapse/homeserver.signing.key"
+# Fetch other servers' signing keys directly (no third-party notary).
+trusted_key_servers: []
+report_stats: false
+
+# Privacy: no unauthenticated / federated browsing of the public room directory.
+allow_public_rooms_without_auth: false
+allow_public_rooms_over_federation: false
+
+# --- Authentication is delegated to MAS (stable integration, Synapse >= 1.157) ---
+matrix_authentication_service:
+  enabled: true
+  endpoint: http://localhost:8080/
+  secret: ${MAS_MATRIX_SECRET}
+
+# --- TURN (coturn) for legacy 1:1 VoIP ---
+turn_shared_secret: ${TURN_SECRET}
+turn_uris:
+  - "turn:${MATRIX_FQDN}:3478?transport=udp"
+  - "turn:${MATRIX_FQDN}:3478?transport=tcp"
+  - "turns:${MATRIX_FQDN}:5349?transport=udp"
+  - "turns:${MATRIX_FQDN}:5349?transport=tcp"
+turn_user_lifetime: 86400000
+turn_allow_guests: true
+
+# --- MatrixRTC / LiveKit (Element Call) ---
+# lk-jwt-service runs as an application service; Synapse proxies
+# /_matrix/client/v1/rtc/livekit/* to it (MSC4512).
+app_service_config_files:
+  - /etc/matrix-synapse/appservices/lk-jwt-service.yaml
+matrix_rtc:
+  transports:
+    - type: m.livekit
+      url: wss://${MATRIX_FQDN}/livekit/sfu
+# MSC4140 delayed events (call membership heartbeats / leave on disconnect)
+max_event_delay_duration: 24h
+rc_message:
+  per_second: 0.5   # headroom for bursty E2EE key sharing in calls
+  burst_count: 30
+rc_delayed_event_mgmt:
+  per_second: 1     # heartbeat every ~5s
+  burst_count: 20
+
+experimental_features:
+  msc3814_enabled: true   # dehydrated devices
+  # MatrixRTC (Element Call / Element X calls)
+  msc4143_enabled: true   # rtc/transports endpoint
+  msc4502_enabled: true   # appservice room-membership lookups (lk-jwt-service)
+  msc4512_enabled: true   # proxy /rtc/livekit to the appservice
+  msc4354_enabled: true   # sticky events: lets Element Call use 'Matrix 2.0' MatrixRTC mode
+  msc4075_enabled: true   # push rules for MatrixRTC call invites / ringing
+  # Sign in with QR code (MSC4388)
+  msc4388_mode: open      # 'open' lets the new device create the rendezvous; rate-limited, 2m TTL
+  msc4133_enabled: true   # custom profile fields (e.g. timezone)
+  # Newer client features (Element Web / Element X)
+  msc4306_enabled: true   # thread subscriptions (+ sliding sync extension)
+  msc3773_enabled: true   # thread notifications
+  msc3664_enabled: true   # push rules matching related events
+  msc3381_polls_enabled: true  # poll push rules
+  msc4155_enabled: true   # invite filtering
+  msc4267_enabled: true   # auto-forget rooms on leave
+  msc4293_enabled: true   # redact on kick/ban
+  msc4446_enabled: true   # move fully-read marker backwards (mark unread)
+  msc3026_enabled: true   # 'busy' presence
+  msc2815_enabled: true   # moderators can view redacted content
+  msc3912_enabled: true   # relation-based redactions
+  msc4491_enabled: true   # invite reasons on room creation
+  msc4536_enabled: true   # additional profile endpoints
+
+# --- URL previews (link previews in Element). Never fetch internal/reserved addresses (SSRF).
+url_preview_enabled: true
+url_preview_ip_range_blacklist:
+  - '127.0.0.0/8'
+  - '10.0.0.0/8'
+  - '172.16.0.0/12'
+  - '192.168.0.0/16'
+  - '100.64.0.0/10'
+  - '192.0.0.0/24'
+  - '169.254.0.0/16'
+  - '192.88.99.0/24'
+  - '198.18.0.0/15'
+  - '192.0.2.0/24'
+  - '198.51.100.0/24'
+  - '203.0.113.0/24'
+  - '224.0.0.0/4'
+  - '::1/128'
+  - 'fe80::/10'
+  - 'fc00::/7'
+  - '2001:db8::/32'
+  - 'ff00::/8'
+  - 'fec0::/10'
+EOF
+    if [ -n "$SMTP_HOST" ]; then
+        put /etc/matrix-synapse/conf.d/email.yaml 640 root:matrix-synapse <<'EOF'
+# Outgoing email (message notifications). Managed by install.sh.
+email:
+  smtp_host: "${SMTP_HOST}"
+  smtp_port: ${SMTP_PORT}
+  smtp_user: "${SMTP_USER}"
+  smtp_pass: "${SMTP_PASS}"
+  require_transport_security: true
+  enable_tls: true
+  notif_from: "Matrix <${SMTP_FROM}>"
+  app_name: Matrix Chat
+  client_base_url: "https://${MATRIX_FQDN}"
+EOF
+    fi
+    put /etc/matrix-synapse/conf.d/registration.yaml 640 root:matrix-synapse <<'EOF'
+registration_shared_secret: ${REG_SECRET}
+EOF
+    put /etc/matrix-synapse/appservices/lk-jwt-service.yaml 640 matrix-synapse:lk-jwt <<'EOF'
+# MatrixRTC Authorization Service (lk-jwt-service) as an application service.
+# Synapse proxies /_matrix/{client,federation}/*/rtc/livekit/* to it (MSC4512) and it checks
+# room membership via MSC4502. No event traffic is needed, hence url: null.
+id: "lk-jwt-service"
+as_token: "${AS_TOKEN}"
+hs_token: "${HS_TOKEN}"
+sender_localpart: "_lk_jwt_service"
+rate_limited: false
+namespaces:
+  users:
+    - exclusive: false
+      regex: ".*"
+url: null
+io.element.msc4502.scopes: [ "urn:matrix:client:io.element.msc4502:rooms:is_joined" ]
+io.element.msc4512.proxy_prefix: "rtc/livekit"
+io.element.msc4512.proxy_url: "http://127.0.0.1:8083"
+EOF
+}
+
+# MAS: secrets/keys come from `mas config generate`; everything else is set here.
+render_mas() {
+    local base out py
+    py=$(pyyaml)
+    out="${RENDER_DIR}/opt/mas/config.yaml"; mkdir -p "$(dirname "$out")"
+    if [ -n "$RENDER_DIR" ]; then
+        base=$(mktemp); printf 'secrets:\n  encryption: "@MAS_ENCRYPTION@"\n  keys: [{key: "@MAS_SIGNING_KEYS@"}]\n' > "$base"
+    else
+        base=$(mktemp); /opt/mas/mas config generate > "$base" 2>/dev/null
+    fi
+    MAS_DB_URI="postgresql://mas:${MAS_DB_PASS}@127.0.0.1/mas_db" "$py" -I - "$base" "$out" <<'EOF'
+import os, sys, yaml
+base = yaml.safe_load(open(sys.argv[1])) or {}
+e = os.environ
+cfg = {
+  "http": {
+    "listeners": [
+      {"name": "web", "binds": [{"address": "127.0.0.1:8080"}], "proxy_protocol": False,
+       "resources": [{"name": n} for n in ("discovery", "human", "oauth", "compat", "graphql", "assets")]},
+      {"name": "internal", "binds": [{"host": "localhost", "port": 8082}], "proxy_protocol": False,
+       "resources": [{"name": "health"}]},
+    ],
+    # nginx passes the real client IP from localhost only
+    "trusted_proxies": ["127.0.0.1/8", "::1/128"],
+    "public_base": f"https://{e['AUTH_FQDN']}/",
+    "issuer": f"https://{e['AUTH_FQDN']}/",
+  },
+  "database": {"uri": e["MAS_DB_URI"], "max_connections": 10, "min_connections": 0,
+               "connect_timeout": 30, "idle_timeout": 600, "max_lifetime": 1800},
+  "secrets": base["secrets"],
+  "passwords": {"enabled": True, "schemes": [{"version": 1, "algorithm": "bcrypt"}], "minimum_complexity": 3},
+  "matrix": {"kind": "synapse", "homeserver": e["MATRIX_FQDN"], "secret": e["MAS_MATRIX_SECRET"],
+             "endpoint": "http://localhost:8008/"},
+  "account": {"password_recovery_enabled": bool(e.get("SMTP_HOST"))},
+}
+if e.get("SMTP_HOST"):
+    cfg["email"] = {"from": f'"Authentication Service" <{e["SMTP_FROM"]}>',
+                    "reply_to": f'"Authentication Service" <{e["SMTP_REPLY_TO"]}>',
+                    "transport": "smtp", "mode": "starttls", "hostname": e["SMTP_HOST"],
+                    "port": int(e["SMTP_PORT"]), "username": e["SMTP_USER"], "password": e["SMTP_PASS"]}
+else:
+    cfg["email"] = {"transport": "blackhole"}
+with open(sys.argv[2], "w") as f:
+    f.write("# Matrix Authentication Service - managed by install.sh. Upstream OAuth providers\n"
+            "# (e.g. Google) are added by hand under upstream_oauth2: - see docs/ADMIN_GUIDE.md.\n")
+    yaml.safe_dump(cfg, f, sort_keys=False)
+EOF
+    rm -f "$base"; chmod 600 "$out"; [ -z "$RENDER_DIR" ] && chown mas:mas "$out"
+    return 0
+}
+
+render_coturn() {
+    put /etc/turnserver.conf 640 root:turnserver <<'EOF'
+# coturn - TURN/STUN for legacy 1:1 calls. Managed by install.sh.
+# Runs /usr/local/bin/turnserver (built from source) via coturn.service.d/override.conf.
+listening-port=3478
+tls-listening-port=5349
+# DTLS (turns:...?transport=udp, advertised by Synapse) is opt-in since coturn 4.17
+dtls
+listening-ip=127.0.0.1
+listening-ip=${LAN_IP}
+
+# Media relay ports - forward 49152-50000/udp on the edge firewall
+min-port=49152
+max-port=50000
+
+# NAT: relay on the LAN IP, advertise the public IP (public/private).
+# external-ip is kept current by update_turn_ip.sh (cron).
+relay-ip=${LAN_IP}
+external-ip=${PUBLIC_IP}/${LAN_IP}
+
+cert=/etc/turn_server_cert.pem
+pkey=/etc/turn_server_pkey.pem
+
+# Auth: HMAC credentials issued by Synapse (turn_shared_secret)
+use-auth-secret
+static-auth-secret=${TURN_SECRET}
+realm=${MATRIX_FQDN}
+total-quota=100
+user-quota=12
+no-multicast-peers
+no-tcp-relay
+userdb=/var/lib/turn/turndb
+
+# Security (Synapse TURN guide): never relay to internal/reserved addresses
+denied-peer-ip=0.0.0.0-0.255.255.255
+denied-peer-ip=10.0.0.0-10.255.255.255
+denied-peer-ip=100.64.0.0-100.127.255.255
+denied-peer-ip=127.0.0.0-127.255.255.255
+denied-peer-ip=169.254.0.0-169.254.255.255
+denied-peer-ip=172.16.0.0-172.31.255.255
+denied-peer-ip=192.0.0.0-192.0.0.255
+denied-peer-ip=192.0.2.0-192.0.2.255
+denied-peer-ip=192.88.99.0-192.88.99.255
+denied-peer-ip=192.168.0.0-192.168.255.255
+denied-peer-ip=198.18.0.0-198.19.255.255
+denied-peer-ip=198.51.100.0-198.51.100.255
+denied-peer-ip=203.0.113.0-203.0.113.255
+denied-peer-ip=240.0.0.0-255.255.255.255
+# ...except this server itself (relay-to-relay when both call legs use TURN)
+allowed-peer-ip=${LAN_IP}
+EOF
+    put /etc/systemd/system/coturn.service.d/override.conf 644 root:root <<'EOF'
+# Run coturn built from source (/usr/local) instead of Debian's old package.
+# The Debian package still provides the turnserver user and base unit.
+[Service]
+ExecStart=
+ExecStart=/usr/local/bin/turnserver -c /etc/turnserver.conf --pidfile=
+EOF
+}
+
+render_livekit() {
+    put /etc/livekit/livekit.yaml 640 livekit:livekit <<'EOF'
+# LiveKit SFU for MatrixRTC (Element Call / Element X calls). Managed by install.sh.
+# Signalling (WebSocket) on 7880 is reverse-proxied by nginx at https://${MATRIX_FQDN}/livekit/sfu/
+port: 7880
+rtc:
+  # Media ports - must be port-forwarded on the edge firewall to this host:
+  tcp_port: 7881        # ICE/TCP fallback
+  udp_port: 7882        # single UDP mux port for all media
+  use_external_ip: true # discover public IP via STUN (we're behind NAT); LAN IPs are offered too
+room:
+  # lk-jwt-service decides who may create rooms; do not let the SFU auto-create them
+  auto_create: false
+keys:
+  ${LIVEKIT_KEY}: ${LIVEKIT_SECRET}
+webhook:
+  # lets lk-jwt-service see participant disconnects (delegated delayed leave, MSC4140)
+  api_key: ${LIVEKIT_KEY}
+  urls:
+    - http://127.0.0.1:8083/sfu_webhook
+turn:
+  enabled: false        # coturn already provides TURN for legacy calls; ICE/TCP 7881 is the fallback here
+logging:
+  level: info
+EOF
+    put /etc/lk-jwt-service/livekit_keys 640 lk-jwt:lk-jwt <<'EOF'
+${LIVEKIT_KEY}: ${LIVEKIT_SECRET}
+EOF
+    put /etc/systemd/system/livekit.service 644 root:root <<'EOF'
+[Unit]
+Description=LiveKit SFU (MatrixRTC media server)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=livekit
+Group=livekit
+ExecStart=/usr/local/bin/livekit-server --config /etc/livekit/livekit.yaml
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=500000
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    put /etc/systemd/system/lk-jwt-service.service 644 root:root <<'EOF'
+[Unit]
+Description=MatrixRTC Authorization Service (lk-jwt-service)
+After=network-online.target livekit.service matrix-synapse.service
+Wants=network-online.target
+
+[Service]
+User=lk-jwt
+Group=lk-jwt
+Environment=LIVEKIT_URL=wss://${MATRIX_FQDN}/livekit/sfu
+Environment=LIVEKIT_KEY_FILE=/etc/lk-jwt-service/livekit_keys
+Environment=LIVEKIT_JWT_BIND=127.0.0.1:8083
+Environment=LIVEKIT_FULL_ACCESS_HOMESERVERS=${MATRIX_FQDN}
+Environment=LIVEKIT_HS_SERVER_NAME=${MATRIX_FQDN}
+Environment=LIVEKIT_AS_REGISTRATION_FILE=/etc/matrix-synapse/appservices/lk-jwt-service.yaml
+Environment=LIVEKIT_SANITY_CHECK_INTERVAL_SECONDS=60
+ExecStart=/usr/local/bin/lk-jwt-service
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+render_mas_units() {
+    put /etc/systemd/system/mas.service 644 root:root <<'EOF'
+[Unit]
+Description=Matrix Authentication Service
+After=postgresql.service network.target
+
+[Service]
+Type=simple
+User=mas
+Group=mas
+WorkingDirectory=/opt/mas
+ExecStart=/opt/mas/mas server
+Restart=always
+RestartSec=10
+Environment=MAS_CONFIG=/opt/mas/config.yaml
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    put /etc/systemd/system/mas-invite.service 644 root:root <<'EOF'
+[Unit]
+Description=Matrix Authentication Service Invite Generator
+After=network.target mas.service
+
+[Service]
+User=mas
+Group=mas
+WorkingDirectory=/opt/mas
+Environment=MAS_PUBLIC_BASE=https://${AUTH_FQDN}
+ExecStart=/usr/bin/python3 /opt/mas/invite_gen.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+render_maubot() {
+    put /opt/maubot/config.yaml 600 maubot:maubot <<'EOF'
+# Maubot - managed by install.sh. Maubot hashes the admin password on first start.
+database: postgresql://maubot:${MAUBOT_DB_PASS}@localhost/maubot_db
+crypto_db_pickle_key: ${MAUBOT_PICKLE_KEY}
+crypto_database: default
+database_opts:
+    min_size: 1
+    max_size: 10
+plugin_directories:
+    upload: /opt/maubot/plugins
+    load:
+    - /opt/maubot/plugins
+    trash: /opt/maubot/trash
+plugin_databases:
+    sqlite: ./plugins
+    postgres:
+    postgres_max_conns_per_plugin: 3
+    postgres_opts: {}
+server:
+    hostname: 127.0.0.1
+    port: 29316
+    public_url: https://${MATRIX_FQDN}
+    ui_base_path: /_matrix/maubot
+    plugin_base_path: /_matrix/maubot/plugin/
+    override_resource_path: false
+    unshared_secret: ${MAUBOT_UNSHARED_SECRET}
+homeservers:
+    ${MATRIX_FQDN}:
+        url: https://${MATRIX_FQDN}
+admins:
+    admin: ${MAUBOT_ADMIN_PASS}
+api_features:
+    login: true
+    plugin: true
+    plugin_upload: true
+    instance: true
+    instance_database: true
+    client: true
+    client_proxy: true
+    client_auth: true
+    dev_open: true
+    log: true
+logging:
+    version: 1
+    formatters:
+        colored:
+            (): maubot.lib.color_log.ColorFormatter
+            format: '[%(asctime)s] [%(levelname)s@%(name)s] %(message)s'
+    handlers:
+        console:
+            class: logging.StreamHandler
+            formatter: colored
+    root:
+        level: INFO
+        handlers: [console]
+EOF
+    put /etc/systemd/system/maubot.service 644 root:root <<'EOF'
+[Unit]
+Description=Maubot
+After=network.target postgresql.service matrix-synapse.service
+
+[Service]
+Type=simple
+User=maubot
+WorkingDirectory=/opt/maubot
+ExecStart=/opt/maubot/venv/bin/python -m maubot
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+render_web() {
+    local maps=""
+    if [ -n "$MAPTILER_KEY" ]; then maps=",
+    \"map_style_url\": \"https://api.maptiler.com/maps/streets/style.json?key=$MAPTILER_KEY\""; fi
+    put /var/www/element-web/config.json 644 www-data:www-data <<EOF
+{
+    "default_server_config": {
+        "m.homeserver": {
+            "base_url": "https://\${MATRIX_FQDN}",
+            "server_name": "\${MATRIX_FQDN}"
+        }
+    },
+    "disable_custom_urls": false,
+    "disable_guests": false,
+    "disable_login_language_selector": false,
+    "disable_3pid_login": false,
+    "force_verification": false,
+    "brand": "Element",
+    "default_widget_container_height": 280,
+    "default_country_code": "\${ELEMENT_COUNTRY_CODE}",
+    "show_labs_settings": true,
+    "features": {
+        "feature_video_rooms": true,
+        "feature_element_call_video_rooms": true,
+        "feature_group_calls": true,
+        "feature_disable_call_per_sender_encryption": "labs"
+    },
+    "default_federate": true,
+    "default_theme": "light",
+    "room_directory": {
+        "servers": [
+            "matrix.org"
+        ]
+    },
+    "enable_presence_by_hs_url": {
+        "https://matrix.org": false
+    },
+    "setting_defaults": {
+        "breadcrumbs": true
+    },
+    "jitsi": {
+        "preferred_domain": "meet.element.io"
+    },
+    "element_call": {
+        "brand": "Element Call",
+        "use_exclusively": true
+    }$maps
+}
+EOF
+    put /var/www/element-web/widgets/element-call/config.json 644 www-data:www-data <<'EOF'
+{
+    "matrix_rtc_mode": "matrix_2_0"
+}
+EOF
+    put /var/www/synapse-admin/config.json 644 www-data:www-data <<'EOF'
+{}
+EOF
+}
+
+render_nginx() {
+    put /etc/nginx/conf.d/realip.conf 644 root:root <<'EOF'
+# Trust X-Forwarded-For only from the edge proxy and localhost, so $remote_addr
+# (and therefore Synapse/MAS rate limits and logs) is the real client IP.
+set_real_ip_from ${EDGE_PROXY_IP};
+set_real_ip_from 127.0.0.1;
+real_ip_header X-Forwarded-For;
+real_ip_recursive on;
+EOF
+    put /etc/nginx/snippets/matrix-proxy.conf 644 root:root <<'EOF'
+# Common headers for proxying to local Matrix services.
+# $remote_addr is the real client IP (see conf.d/realip.conf).
+proxy_set_header Host              $host;
+proxy_set_header X-Forwarded-For   $remote_addr;
+proxy_set_header X-Forwarded-Proto https;
+proxy_set_header X-Real-IP         $remote_addr;
+proxy_http_version 1.1;
+EOF
+    put "/etc/nginx/sites-available/${MATRIX_FQDN}" 644 root:root <<'EOF'
+# ${MATRIX_FQDN} - Element Web, Synapse client/federation API, MatrixRTC, admin UIs.
+# Public traffic arrives from the edge proxy over HTTPS with the original Host header.
+
+# Plain HTTP: redirect everything to HTTPS.
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    # default_server: requests with an unknown Host land here (not on auth.)
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name ${MATRIX_FQDN};
+
+    ssl_certificate     /etc/nginx/ssl/matrix.crt;
+    ssl_certificate_key /etc/nginx/ssl/matrix.key;
+
+    client_max_body_size 50M;   # matches Synapse max_upload_size
+
+    # Element Web (static)
+    root /var/www/element-web;
+    index index.html;
+
+    # --- Discovery -------------------------------------------------------
+    location = /.well-known/matrix/client {
+        default_type application/json;
+        add_header Access-Control-Allow-Origin *;
+        return 200 '{"m.homeserver": {"base_url": "https://${MATRIX_FQDN}"}}';
+    }
+    location = /.well-known/matrix/server {
+        default_type application/json;
+        add_header Access-Control-Allow-Origin *;
+        return 200 '{"m.server": "${MATRIX_FQDN}:443"}';
+    }
+
+    # --- MAS compatibility layer -----------------------------------------
+    # Legacy (non-OAuth) clients log in/out/refresh against MAS, not Synapse.
+    location ~ ^/_matrix/client/[^/]+/(login|logout|refresh)$ {
+        include snippets/matrix-proxy.conf;
+        proxy_pass http://127.0.0.1:8080;
+    }
+
+    # Synapse-Admin still calls r0 endpoints that Synapse no longer serves.
+    location ~ ^/_matrix/client/r0/(.*)$ {
+        rewrite ^/_matrix/client/r0/(.*)$ /_matrix/client/v3/$1 last;
+    }
+
+    # --- Maubot admin UI/API (edge proxy restricts to private IPs) ------
+    location /_matrix/maubot {
+        include snippets/matrix-proxy.conf;
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_pass http://127.0.0.1:29316;
+    }
+
+    # --- Synapse: client + federation API, Synapse-specific endpoints ----
+    location /_matrix {
+        include snippets/matrix-proxy.conf;
+        proxy_pass http://127.0.0.1:8008;
+    }
+    location /_synapse/client {
+        include snippets/matrix-proxy.conf;
+        proxy_pass http://127.0.0.1:8008;
+    }
+    # Admin API (edge proxy restricts to private IPs)
+    location /_synapse/admin {
+        include snippets/matrix-proxy.conf;
+        proxy_pass http://127.0.0.1:8008;
+    }
+
+    # --- MatrixRTC (Element Call) ----------------------------------------
+    # MatrixRTC Authorization Service (lk-jwt-service) - legacy/standalone endpoints.
+    # (Current clients reach it through Synapse: /_matrix/client/v1/rtc/livekit/*)
+    location ^~ /livekit/jwt/ {
+        include snippets/matrix-proxy.conf;
+        proxy_pass http://127.0.0.1:8083/;
+    }
+    # LiveKit SFU WebSocket signalling (media itself uses 7881/tcp + 7882/udp directly)
+    location ^~ /livekit/sfu/ {
+        include snippets/matrix-proxy.conf;
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+        proxy_buffering off;
+        proxy_pass http://127.0.0.1:7880/;
+    }
+
+    # --- Web UIs -----------------------------------------------------------
+    # MAS invite-token generator (the edge proxy must put auth in front of it)
+    location /register {
+        include snippets/matrix-proxy.conf;
+        proxy_pass http://127.0.0.1:8081/;
+    }
+    # Synapse-Admin (static)
+    location /synapse-admin {
+        alias /var/www/synapse-admin;
+        index index.html;
+        try_files $uri $uri/ /synapse-admin/index.html;
+    }
+}
+EOF
+    put "/etc/nginx/sites-available/${AUTH_FQDN}" 644 root:root <<'EOF'
+# ${AUTH_FQDN} - Matrix Authentication Service (OIDC provider, account UI).
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name ${AUTH_FQDN};
+
+    ssl_certificate     /etc/nginx/ssl/matrix.crt;
+    ssl_certificate_key /etc/nginx/ssl/matrix.key;
+
+    location / {
+        include snippets/matrix-proxy.conf;
+        proxy_pass http://127.0.0.1:8080;
+    }
+}
+EOF
+}
+
+render_system() {
+    put /etc/apt/apt.conf.d/52matrix-unattended 644 root:root <<'EOF'
+// Only automatic *security* updates from Debian. Matrix stack components
+// (Synapse, nginx.org, PGDG, ...) are upgraded deliberately via upgrade_services.sh.
+Unattended-Upgrade::Origins-Pattern {
+        "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+};
+Unattended-Upgrade::Automatic-Reboot "false";
+// Keep our config files if a package update ships new ones.
+Dpkg::Options { "--force-confold"; };
+EOF
+    put /etc/apt/apt.conf.d/20auto-upgrades 644 root:root <<'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+EOF
+}
+
+render_all() {
+    render_synapse; render_mas; render_mas_units; render_coturn; render_livekit
+    render_maubot; render_web; render_nginx; render_system
+}
+
+if [ -n "$RENDER_DIR" ]; then
+    render_all
+    log "Rendered configuration into $RENDER_DIR"
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Installation
+# ---------------------------------------------------------------------------
+[ "$EUID" -eq 0 ] || die "run as root"
+grep -q 'VERSION_CODENAME=bookworm' /etc/os-release || die "this installer targets Debian 12 (bookworm)"
+if [ -f /opt/mas/config.yaml ] && ! $FORCE; then
+    die "an installation already exists (/opt/mas/config.yaml). Use upgrade_services.sh to update; --force to reinstall over it"
+fi
+
+WORKDIR=$(mktemp -d); trap 'rm -rf "$WORKDIR"' EXIT
+export DEBIAN_FRONTEND=noninteractive
+APT="apt-get -y -qq -o Dpkg::Options::=--force-confold"
+
+log "Base packages"
+apt-get update -qq
+$APT install curl gnupg ca-certificates lsb-release dnsutils openssl locales gettext-base \
+     python3 python3-yaml python3-flask python3-venv sudo cron logrotate unattended-upgrades \
+     build-essential pkg-config libevent-dev libssl-dev libsqlite3-dev libsystemd-dev libmicrohttpd-dev \
+     libpq-dev libolm-dev ssl-cert
+sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen && locale-gen >/dev/null
+
+log "APT repositories: packages.matrix.org, PGDG, nginx.org mainline"
+add_repo_key() { # url dest expected-fingerprint...
+    local url=$1 dest=$2; shift 2
+    curl -fsSL "$url" | gpg --dearmor > "$dest"
+    local fps; fps=$(gpg --show-keys --with-colons "$dest" | awk -F: '/^fpr/{print $10}')
+    for fp in "$@"; do grep -qx "$fp" <<<"$fps" || die "unexpected signing key for $url"; done
+}
+curl -fsSL -o /usr/share/keyrings/matrix-org-archive-keyring.gpg https://packages.matrix.org/debian/matrix-org-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/matrix-org-archive-keyring.gpg] https://packages.matrix.org/debian/ bookworm main" > /etc/apt/sources.list.d/matrix-org.list
+add_repo_key https://www.postgresql.org/media/keys/ACCC4CF8.asc /usr/share/keyrings/pgdg.gpg B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8
+echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+add_repo_key https://nginx.org/keys/nginx_signing.key /usr/share/keyrings/nginx-archive-keyring.gpg 573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62
+echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/mainline/debian bookworm nginx" > /etc/apt/sources.list.d/nginx.list
+printf 'Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 900\n' > /etc/apt/preferences.d/99nginx
+apt-get update -qq
+PG_MAJOR=$(apt-cache search --names-only '^postgresql-[0-9]+$' | grep -oP '^postgresql-\K[0-9]+' | sort -n | tail -1)
+echo "matrix-synapse-py3 matrix-synapse/server-name string $MATRIX_FQDN" | debconf-set-selections
+echo "matrix-synapse-py3 matrix-synapse/report-stats boolean false" | debconf-set-selections
+$APT install matrix-synapse-py3 "postgresql-$PG_MAJOR" nginx coturn
+systemctl stop coturn || true
+
+log "Service users"
+for u in mas maubot livekit lk-jwt; do id "$u" &>/dev/null || useradd --system --no-create-home --shell /usr/sbin/nologin "$u"; done
+usermod -d /opt/mas mas 2>/dev/null || true
+install -d -o maubot -g maubot -m 750 /home/maubot
+
+log "PostgreSQL $PG_MAJOR databases"
+(cd /tmp && sudo -u postgres psql -q -v ON_ERROR_STOP=1) <<EOF
+CREATE ROLE synapse_user LOGIN PASSWORD '$SYNAPSE_DB_PASS';
+CREATE DATABASE synapse_db OWNER synapse_user ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' TEMPLATE template0;
+CREATE ROLE mas LOGIN PASSWORD '$MAS_DB_PASS';
+CREATE DATABASE mas_db OWNER mas;
+CREATE ROLE maubot LOGIN PASSWORD '$MAUBOT_DB_PASS';
+CREATE DATABASE maubot_db OWNER maubot;
+EOF
+
+log "Downloading components"
+install_mas "$WORKDIR" >/dev/null
+install_element_web "$WORKDIR"
+install_synapse_admin "$WORKDIR"
+install_livekit "$WORKDIR"
+install_lk_jwt "$WORKDIR"
+build_coturn "$WORKDIR" "$(latest_coturn_tag)"
+install -m 644 "$HERE/mas-invite/invite_gen.py" /opt/mas/invite_gen.py
+chown -R root:root /opt/mas   # binaries root-owned; only config.yaml belongs to mas
+
+log "Maubot (Python venv)"
+install -d -o maubot -g maubot /opt/maubot /opt/maubot/plugins /opt/maubot/trash
+sudo -u maubot python3 -m venv /opt/maubot/venv
+install -m 644 "$HERE/maubot_requirements.txt" /opt/maubot/requirements.txt
+sudo -H -u maubot /opt/maubot/venv/bin/pip install -q --upgrade pip
+sudo -H -u maubot /opt/maubot/venv/bin/pip install -q -r /opt/maubot/requirements.txt
+
+log "Writing configuration"
+install -d -m 750 -o root -g matrix-synapse /etc/matrix-synapse/appservices
+chown matrix-synapse:lk-jwt /etc/matrix-synapse/appservices
+install -d -m 750 -o livekit -g livekit /etc/livekit
+install -d -m 750 -o lk-jwt -g lk-jwt /etc/lk-jwt-service
+render_all
+rm -f /etc/nginx/conf.d/default.conf
+sed -i -e 's/^user .*/user www-data;/' /etc/nginx/nginx.conf
+grep -q 'sites-enabled' /etc/nginx/nginx.conf || sed -i 's|^\(\s*\)include /etc/nginx/conf.d/\*.conf;|&\n\1include /etc/nginx/sites-enabled/*;|' /etc/nginx/nginx.conf
+mkdir -p /etc/nginx/sites-enabled
+ln -sf "/etc/nginx/sites-available/$MATRIX_FQDN" "/etc/nginx/sites-enabled/$MATRIX_FQDN"
+ln -sf "/etc/nginx/sites-available/$AUTH_FQDN" "/etc/nginx/sites-enabled/$AUTH_FQDN"
+sed -i 's/create 640 nginx adm/create 640 www-data adm/' /etc/logrotate.d/nginx 2>/dev/null || true
+
+# TLS: placeholder self-signed cert until refresh_certs.sh fetches the real one
+install -d -m 755 /etc/nginx/ssl
+if [ ! -f /etc/nginx/ssl/matrix.crt ]; then
+    cp /etc/ssl/certs/ssl-cert-snakeoil.pem /etc/nginx/ssl/matrix.crt
+    cp /etc/ssl/private/ssl-cert-snakeoil.key /etc/nginx/ssl/matrix.key
+    chmod 600 /etc/nginx/ssl/matrix.key
+fi
+for f in cert pkey; do
+    src=/etc/nginx/ssl/matrix.crt; [ $f = pkey ] && src=/etc/nginx/ssl/matrix.key
+    install -m 640 -o turnserver -g turnserver "$src" /etc/turn_server_$f.pem
+done
+
+log "MAS database + admin user"
+(cd /opt/mas && sudo -u mas MAS_CONFIG=/opt/mas/config.yaml /opt/mas/mas config check)
+(cd /opt/mas && sudo -u mas MAS_CONFIG=/opt/mas/config.yaml /opt/mas/mas database migrate)
+(cd /opt/mas && sudo -u mas MAS_CONFIG=/opt/mas/config.yaml /opt/mas/mas config sync --prune)
+
+log "Starting services"
+systemctl daemon-reload
+systemctl enable --now mas
+systemctl restart matrix-synapse
+for _ in $(seq 1 60); do curl -sf http://localhost:8008/health >/dev/null && break; sleep 2; done
+(cd /opt/mas && sudo -u mas MAS_CONFIG=/opt/mas/config.yaml /opt/mas/mas manage register-user "$ADMIN_USER" \
+    --password "$ADMIN_PASS" --admin --yes --ignore-password-complexity) || warn "admin user not created"
+systemctl enable --now livekit lk-jwt-service maubot mas-invite coturn nginx
+systemctl restart coturn nginx
+
+log "Cron jobs"
+crontab -l 2>/dev/null | grep -v -e refresh_certs.sh -e monitor_services.sh -e update_turn_ip.sh > "$WORKDIR/cron" || true
+cat >> "$WORKDIR/cron" <<EOF
+0 0 * * * $HERE/refresh_certs.sh >> /var/log/refresh_certs.log 2>&1
+*/5 * * * * $HERE/monitor_services.sh >> /var/log/matrix_monitor.log 2>&1
+*/15 * * * * $HERE/update_turn_ip.sh >> /var/log/update_turn_ip.log 2>&1
+EOF
+crontab "$WORKDIR/cron"
+[ -f "$HERE/refresh_certs.conf" ] && "$HERE/refresh_certs.sh" || warn "refresh_certs.conf missing - nginx is using a self-signed placeholder cert"
+
+umask 077
+cat > /root/matrix_credentials.txt <<EOF
+Matrix installation credentials - $(date -Is)
+Homeserver:      https://$MATRIX_FQDN   (auth: https://$AUTH_FQDN)
+Admin user:      @$ADMIN_USER:$MATRIX_FQDN
+Admin password:  $ADMIN_PASS
+Maubot UI:       https://$MATRIX_FQDN/_matrix/maubot   user: admin  password: $MAUBOT_ADMIN_PASS
+(Database passwords and service secrets are in the service config files.)
+EOF
+
+log "Done. Credentials: /root/matrix_credentials.txt"
+log "Next: configure the edge proxy and firewall (docs/INSTALL.md), then run ./upgrade_services.sh to verify health."

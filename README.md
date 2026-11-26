@@ -1,46 +1,57 @@
-# Matrix Synapse + Services Installer
+# Matrix Homeserver Stack for Debian 12
 
-A comprehensive, opinionated installation script for setting up a full-featured Matrix Homeserver stack on Debian 12 (Bookworm).
+Scripts and documentation to install, run and maintain a self-hosted Matrix server with
+modern authentication and calling, on a Debian 12 LXC/VM behind an edge reverse proxy.
 
-**Features:**
-- **Core**: Matrix Synapse (Homeserver) & Nginx (Proxy).
-- **Client**: Element Web.
-- **VoIP**: Coturn (STUN/TURN) configured for standard and TLS media.
-- **Bots**: Maubot framework with virtualization.
-- **Monitoring**: Automated health checks with Discord/Webhook alerting.
-- **Utilities**: Interactive installation or config-file driven for automation.
+| Component | Role | Source |
+| :--- | :--- | :--- |
+| Synapse | Homeserver | packages.matrix.org |
+| Matrix Authentication Service (MAS) | Accounts, OIDC login, QR sign-in | GitHub release |
+| PostgreSQL | Databases | PGDG (newest major) |
+| nginx | Routing / static files | nginx.org mainline |
+| Element Web + Element Call | Web client, calling | GitHub release |
+| LiveKit + lk-jwt-service | MatrixRTC calls (Element Call, Element X) | GitHub release |
+| coturn | TURN/STUN for legacy calls | built from source |
+| Synapse-Admin | Admin UI | GitHub release |
+| Maubot | Bots | pip |
+| mas-invite | Invite-token web page | this repo |
 
-## ⚠️ Requirements & Warnings
+Versions validated together on 2026-11-26: Synapse 1.166.0, MAS 1.30.0, PostgreSQL 19,
+nginx 1.31.10, Element Web 1.12.36, LiveKit 1.13.11, lk-jwt-service 0.10.0, coturn 4.19.2,
+Synapse-Admin 0.11.4, Maubot 0.6.1.
 
-- **OS**: Designed and tested **ONLY on Debian 12 (Bookworm)**.
-  - *Other distributions (Ubuntu, Fedora, etc.) have NOT been tested and may break due to package naming or path differences.*
-- **Root Access**: Scripts must be run as root.
-- **Clean Install**: Best run on a fresh LXC container or VM.
+## Quick start
 
-## Installation
-
-### 1. Quick Start (Interactive)
-Run the script and follow the prompts.
 ```bash
-chmod +x install-service-improved.sh
-./install-service-improved.sh
+cp setup.config.example setup.config && chmod 600 setup.config && nano setup.config
+./install.sh
 ```
 
-### 2. Config-based (Automated)
-Create a `setup.config` file to skip prompts (useful for automation).
-```bash
-cp setup.config.example setup.config
-nano setup.config
-# Edit settings...
-./install-service-improved.sh
-```
+Prerequisites (DNS, port forwards, edge proxy config) are in **[docs/INSTALL.md](docs/INSTALL.md)**.
 
 ## Documentation
-- [INSTALL.md](INSTALL.md) - Detailed installation, network, and firewall guide.
-- [admin_guide.md](admin_guide.md) - Administration, commands, and maintenance.
 
-## Credits & Inspiration
-This toolkit was built for reliability and ease of deployment, heavily inspired by the work of the **BashClub** team:
-- Source: [zamba-lxc-toolbox/matrix/install-service.sh](https://raw.githubusercontent.com/bashclub/zamba-lxc-toolbox/refs/heads/main/src/matrix/install-service.sh)
+* [docs/INSTALL.md](docs/INSTALL.md) — prerequisites, firewall ports, Caddy example, install, verify
+* [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — component diagram, ports, request flows, secrets, troubleshooting
+* [docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md) — users, upgrades, backups, certificates, configuration reference, known limitations
 
-Modifications include externalizing requirements, adding interactive configuration, ensuring native Sliding Sync support, and integrating Maubot/Registration services.
+## Repository layout
+
+| Path | Purpose | Schedule |
+| :--- | :--- | :--- |
+| `install.sh` | Fresh install; `--render-only DIR` writes all configs for review | once |
+| `upgrade_services.sh` | Upgrade every component + health check | manual |
+| `lib/common.sh` | Shared download/verify/build helpers | — |
+| `manage_users.py` | User admin via MAS (list/register/lock/deactivate/invite...) | manual |
+| `monitor_services.sh` | Service + endpoint checks, webhook alerts | cron */5 |
+| `update_turn_ip.sh` | Keep coturn/LiveKit public IP current | cron */15 |
+| `refresh_certs.sh` | Pull TLS cert from the edge, reload nginx/coturn | cron nightly |
+| `backup_matrix.sh` | DB dumps + configs + media, 14-day retention | cron nightly (enable manually) |
+| `mas-invite/invite_gen.py` | Invite-token page served at `/register` | systemd |
+| `maubot_requirements.txt` | Maubot venv packages | — |
+| `setup.config.example`, `refresh_certs.conf.example` | Site settings templates (real files are git-ignored) | — |
+
+## Credits
+
+Originally inspired by the BashClub
+[zamba-lxc-toolbox Matrix installer](https://github.com/bashclub/zamba-lxc-toolbox).

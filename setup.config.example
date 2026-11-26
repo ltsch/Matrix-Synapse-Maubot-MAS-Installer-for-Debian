@@ -1,38 +1,39 @@
-# Matrix Services Installation Configuration
-# Copy this file to 'setup.config' and edit before running install-service-improved.sh
+# setup.config - site settings for install.sh, monitor_services.sh and update_turn_ip.sh.
+# Copy to setup.config (git-ignored, keep it mode 600) and edit.
 
-# --- Required Public Settings ---
-# The fully qualified domain name your users will access (e.g., chat.example.com)
+# --- Names -------------------------------------------------------------------
+# Public hostname of the homeserver; also the Matrix server_name (@user:chat.example.com)
 MATRIX_FQDN="chat.example.com"
+# Matrix Authentication Service hostname (default: auth.$MATRIX_FQDN)
+# AUTH_FQDN="auth.chat.example.com"
 
-# Email for critical admin notifications (and potentially Let's Encrypt)
-ADMIN_EMAIL="admin@example.com"
-
-# The password for the initial @admin:FOO user.
-# If left empty, one will be generated for you.
-ADMIN_PASS="ChangeMeToSomethingSecure123!"
-
-# --- Feature Flags ---
-# Set to "true" to install the custom registration portal (app.py).
-# Set to "false" to skip it.
-# If unset, the script will prompt you interactively.
-# INSTALL_REGISTRATION="true"
-
-# Optional Discord Webhook integration for the monitor_services.sh script
-# MONITOR_WEBHOOK_URL="https://discord.com/api/webhooks/..."
-
-# --- Optional Technical Settings (Auto-generated if omitted) ---
-# Database Name for Synapse
-# DB_NAME="synapse_db"
-
-# Database User for Synapse
-# DB_USER="synapse_user"
-
-# Secrets (Will be secure random hex if not provided)
-# DB_PASS=""
-# MAUBOT_DB_PASS=""
-# TURN_SECRET=""
-
-# Coturn external-ip sync (update_turn_ip.sh)
+# --- Network -----------------------------------------------------------------
+# This host's LAN IP (auto-detected if empty). coturn/LiveKit relay on it.
+LAN_IP="192.168.1.100"
+# The edge reverse proxy (e.g. Caddy on the firewall) that forwards HTTPS here.
+# nginx trusts X-Forwarded-For only from this address.
+EDGE_PROXY_IP="192.168.1.1"
+# A hostname that always resolves to your public IP (DDNS). coturn advertises it;
+# update_turn_ip.sh re-checks it every 15 minutes.
 TURN_DDNS_HOST="home.example.com"
-TURN_PRIVATE_IP="192.168.1.100"
+# PUBLIC_IP="203.0.113.10"   # optional override if TURN_DDNS_HOST cannot be resolved
+
+# --- Initial admin (created in MAS) -----------------------------------------
+ADMIN_USER="admin"
+# ADMIN_PASS=""              # generated and saved to /root/matrix_credentials.txt if empty
+
+# --- Email (optional; enables MAS password recovery + Synapse notifications) --
+SMTP_HOST=""                 # e.g. smtp.mailgun.org
+SMTP_PORT="587"              # STARTTLS
+SMTP_USER=""
+SMTP_PASS=""
+SMTP_FROM=""                 # e.g. matrix@mg.example.com
+SMTP_REPLY_TO=""             # defaults to SMTP_FROM
+
+# --- Element Web -------------------------------------------------------------
+ELEMENT_COUNTRY_CODE="US"    # default for phone-number entry
+# MAPTILER_KEY=""            # enables location-sharing maps
+
+# --- Monitoring (monitor_services.sh) ----------------------------------------
+# Discord-compatible webhook for alerts (leave empty to only log)
+MONITOR_WEBHOOK_URL=""

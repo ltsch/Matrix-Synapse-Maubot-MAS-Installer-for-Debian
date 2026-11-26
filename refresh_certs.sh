@@ -27,6 +27,7 @@ set -e
 CONFIG_FILE="$(dirname "$0")/refresh_certs.conf"
 
 if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck source=/dev/null
     source "$CONFIG_FILE"
 else
     echo "Error: Configuration file $CONFIG_FILE not found."

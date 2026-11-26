@@ -1,135 +1,101 @@
 #!/usr/bin/env python3
+"""manage_users.py - user administration for a MAS-backed Synapse.
+
+MAS (Matrix Authentication Service) owns accounts, passwords and sessions; it
+provisions users into Synapse. Every change therefore goes through the MAS CLI
+so the two stay consistent - never edit Synapse's users table directly.
+
+Run as root. Listing reads both databases through local peer auth (no passwords).
+
+  manage_users.py list
+  manage_users.py register <localpart> [--admin]      # prompts for password
+  manage_users.py lock <localpart>                    # block login, keep account
+  manage_users.py unlock <localpart>
+  manage_users.py deactivate <localpart>              # permanent (erases account in Synapse)
+  manage_users.py reactivate <localpart>
+  manage_users.py logout <localpart>                  # kill all sessions/devices
+  manage_users.py promote <localpart> | demote <localpart>
+  manage_users.py invite [--uses N] [--days D]        # registration token
+"""
 import argparse
+import getpass
+import os
 import subprocess
 import sys
-from datetime import datetime
 
-# Database Config
-DB_USER = "synapse_user"
-DB_NAME = "synapse_db"
-# PGPASSWORD environment variable should be set when running,
-# or hardcoded for this helper
-DB_PASS = "REDACTED-ROTATED"
-DB_HOST = "127.0.0.1"
-
-# MAS Config
 MAS_BIN = "/opt/mas/mas"
 MAS_CONFIG = "/opt/mas/config.yaml"
 
 
-def run_sql(query, fetch=True):
-    """Executes a SQL query. If fetch=True, uses COPY TO STDOUT for CSV output."""
-    if fetch:
-        # Use COPY for SELECTs to get clean CSV
-        cmd = [
-            "psql",
-            "-h",
-            DB_HOST,
-            "-U",
-            DB_USER,
-            "-d",
-            DB_NAME,
-            "-c",
-            f"COPY ({query}) TO STDOUT WITH CSV HEADER",
-        ]
-    else:
-        # Direct execution for UPDATE/DELETE
-        cmd = [
-            "psql", "-h", DB_HOST, "-U", DB_USER, "-d", DB_NAME, "-c", query
-        ]
+def mas(*args, check=True):
+    """Run `mas manage ...` as the mas user; return combined output."""
+    cmd = ["sudo", "-u", "mas", f"MAS_CONFIG={MAS_CONFIG}", MAS_BIN, "manage", *args]
+    r = subprocess.run(cmd, cwd="/opt/mas", capture_output=True, text=True)
+    out = (r.stdout + r.stderr).strip()
+    if check and r.returncode != 0:
+        sys.exit(f"mas {' '.join(args[:1])} failed:\n{out}")
+    return out
 
-    env = {"PGPASSWORD": DB_PASS, "PATH": "/usr/bin:/bin"}
 
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, env=env, check=True
-        )
-        return result.stdout
-    except subprocess.CalledProcessError as e:
-        print(f"Error executing SQL: {e.stderr}", file=sys.stderr)
-        sys.exit(1)
+def psql(db, query):
+    r = subprocess.run(["sudo", "-u", "postgres", "psql", "-d", db, "-AtF", "\t", "-c", query],
+                       cwd="/tmp", capture_output=True, text=True, check=True)
+    return [line.split("\t") for line in r.stdout.splitlines() if line]
 
 
 def list_users():
-    """Lists all users from Synapse DB."""
-    query = (
-        "SELECT name, admin, deactivated, creation_ts FROM users ORDER BY name ASC"
-    )
-    csv_output = run_sql(query)
-
-    print(f"{'USERNAME':<40} {'ADMIN':<10} {'DEACTIVATED':<12} {'CREATED'}")
-    print("-" * 80)
-
-    # Parse CSV manually (simple enough for this output)
-    for line in csv_output.strip().split("\n"):
-        if not line or line.startswith("name,admin"):
-            continue
-        parts = line.split(",")
-        if len(parts) >= 4:
-            name = parts[0]
-            admin = "Yes" if parts[1] == "1" else "No"
-            deact = "Yes" if parts[2] == "1" else "No"
-            try:
-                # TS is usually seconds or milliseconds? Synapse uses seconds.
-                ts = datetime.fromtimestamp(int(parts[3])).strftime("%Y-%m-%d")
-            except Exception:
-                ts = parts[3]
-
-            print(f"{name:<40} {admin:<10} {deact:<12} {ts}")
-
-
-def delete_user(username):
-    """Deactivates user in Synapse and Locks in MAS."""
-    print(f"[*] Deactivating user {username}...")
-
-    # 1. Deactivate in Synapse DB
-    deact_sql = (
-        f"UPDATE users SET deactivated = 1, password_hash='' WHERE name = '{username}'"
-    )
-    run_sql(deact_sql, fetch=False)
-    print("    - Marked deactivated in Synapse DB.")
-
-    # 2. Lock in MAS (Prevent Login)
-    # MAS username is usually the localpart, but let's try to match.
-    # We'll assume input is full MXID or localpart.
-    localpart = username.split(":")[0].replace("@", "")
-
-    cmd = [MAS_BIN, "manage", "lock-user", localpart]
-    env = {"MAS_CONFIG": MAS_CONFIG, "PATH": "/usr/bin:/bin"}
-
-    print(f"    - Locking user '{localpart}' in MAS...")
-    try:
-        subprocess.run(cmd, env=env, check=False)  # Don't error if user not in MAS
-    except Exception as e:
-        print(f"    ! Warning: Failed to run MAS lock: {e}")
-
-    print(f"[+] User {username} has been processed.")
+    mas_rows = psql("mas_db", "SELECT username, can_request_admin, locked_at IS NOT NULL, "
+                              "deactivated_at IS NOT NULL, created_at::date FROM users ORDER BY username")
+    syn = {r[0]: r for r in psql("synapse_db", "SELECT name, admin, deactivated, locked FROM users")}
+    print(f"{'USER':<28} {'MAS-ADMIN':<9} {'LOCKED':<7} {'DEACT':<6} {'IN-SYNAPSE':<10} CREATED")
+    for name, admin, locked, deact, created in mas_rows:
+        s = next((v for k, v in syn.items() if k.startswith(f"@{name}:")), None)
+        insyn = "no!" if s is None else "yes"
+        yn = lambda b: "yes" if b in ("t", "1", "true") else "-"
+        print(f"{name:<28} {yn(admin):<9} {yn(locked):<7} {yn(deact):<6} {insyn:<10} {created}")
+    missing = [n for n, *_ in mas_rows if not any(k.startswith(f"@{n}:") for k in syn)]
+    if missing:
+        print(f"\nWARNING: in MAS but not Synapse (provisioning failed?): {', '.join(missing)}")
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Manage Matrix Users (Custom Script)"
-    )
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    if os.geteuid() != 0:
+        sys.exit("run as root")
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("list")
+    r = sub.add_parser("register"); r.add_argument("user"); r.add_argument("--admin", action="store_true")
+    for c in ("lock", "unlock", "deactivate", "reactivate", "logout", "promote", "demote"):
+        sub.add_parser(c).add_argument("user")
+    i = sub.add_parser("invite"); i.add_argument("--uses", type=int, default=1); i.add_argument("--days", type=int, default=7)
+    a = p.parse_args()
 
-    # List command
-    subparsers.add_parser("list", help="List all users")
-
-    # Delete command
-    del_parser = subparsers.add_parser("delete", help="Delete (Deactivate) a user")
-    del_parser.add_argument(
-        "username", help="Full MXID (e.g. @user:chat.example.com)"
-    )
-
-    args = parser.parse_args()
-
-    if args.command == "list":
+    user = getattr(a, "user", "").lstrip("@").split(":")[0]  # accept @user:server or localpart
+    if a.cmd == "list":
         list_users()
-    elif args.command == "delete":
-        if not args.username.startswith("@"):
-            print("Error: Please provide full MXID (e.g. @user:chat.example.com)")
-            sys.exit(1)
-        delete_user(args.username)
+    elif a.cmd == "register":
+        pw = getpass.getpass(f"Password for {user}: ")
+        args = ["register-user", user, "--password", pw, "--yes"] + (["--admin"] if a.admin else [])
+        print(mas(*args))
+    elif a.cmd == "lock":
+        print(mas("lock-user", user))
+    elif a.cmd == "unlock":
+        print(mas("unlock-user", user))
+    elif a.cmd == "deactivate":
+        if input(f"Permanently deactivate {user}? type the username to confirm: ") != user:
+            sys.exit("aborted")
+        print(mas("lock-user", user, "--deactivate"))
+    elif a.cmd == "reactivate":
+        print(mas("unlock-user", user, "--reactivate"))
+    elif a.cmd == "logout":
+        print(mas("kill-sessions", user))
+    elif a.cmd == "promote":
+        print(mas("promote-admin", user))
+    elif a.cmd == "demote":
+        print(mas("demote-admin", user))
+    elif a.cmd == "invite":
+        print(mas("issue-user-registration-token", "--usage-limit", str(a.uses),
+                  "--expires-in", str(a.days * 86400)))
 
 
 if __name__ == "__main__":

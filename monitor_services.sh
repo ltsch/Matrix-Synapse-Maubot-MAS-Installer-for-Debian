@@ -6,12 +6,12 @@
 set -o pipefail
 
 # --- Configuration ---
-CONFIG_FILE="/root/setup.config"
+CONFIG_FILE="$(dirname "$(readlink -f "$0")")/setup.config"
 HOSTNAME=$(hostname)
-DATE=$(date)
 
 # Load config
 if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck source=/dev/null
     source "$CONFIG_FILE"
 else
     echo "Warning: $CONFIG_FILE not found. Configuring defaults/loading env..."
@@ -21,7 +21,8 @@ fi
 SERVICES=("matrix-synapse" "mas" "mas-invite" "coturn" "livekit" "lk-jwt-service" "maubot" "nginx" "postgresql")
 
 # URLs to check (HTTP 200/301/302/404 are acceptable, Connection Refused is bad)
-URLS=("https://$MATRIX_FQDN/_matrix/client/versions" "https://auth.$MATRIX_FQDN/.well-known/openid-configuration" "https://$MATRIX_FQDN/livekit/jwt/healthz" "https://$MATRIX_FQDN/livekit/sfu/" "https://$MATRIX_FQDN/_matrix/maubot")
+: "${AUTH_FQDN:=auth.$MATRIX_FQDN}"
+URLS=("https://$MATRIX_FQDN/_matrix/client/versions" "https://$AUTH_FQDN/.well-known/openid-configuration" "https://$MATRIX_FQDN/livekit/jwt/healthz" "https://$MATRIX_FQDN/livekit/sfu/" "https://$MATRIX_FQDN/_matrix/maubot")
 
 # Webhook URL (from setup.config or passed here)
 # If not set in config, you can hardcode it below or set env var.
