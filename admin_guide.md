@@ -281,3 +281,10 @@ Legacy 1:1 calls still use Coturn.
 | nginx | `nginx.org` mainline (`/etc/apt/sources.list.d/nginx.list`, pinned in `/etc/apt/preferences.d/99nginx`) | Debian-style `sites-enabled/` layout kept in our `nginx.conf`; the package's `conf.d/default.conf` was removed. |
 | Coturn | Built from source into `/usr/local` by `upgrade_services.sh` | `coturn.service.d/override.conf` points systemd at `/usr/local/bin/turnserver`. DTLS is opt-in (`dtls` in `turnserver.conf`); `no-cli` no longer exists. |
 | Synapse | `packages.matrix.org` | Enabled experimental features are commented inline in `homeserver.yaml` under `experimental_features`. |
+
+### 15. Client Assumptions (latest apps only)
+The server is configured assuming all users run current Element Web / Element X:
+- Element Call is used for **all** calls (`element_call.use_exclusively` in Element Web `config.json`); legacy 1:1 WebRTC/Jitsi calls are disabled in Element Web. Coturn remains for any other client that still places legacy calls.
+- Embedded Element Call is pinned to `matrix_rtc_mode: matrix_2_0` (sticky events) in `/var/www/element-web/widgets/element-call/config.json`.
+- Only the stable `m.livekit` MatrixRTC transport is advertised; `.well-known/matrix/client` carries only `m.homeserver` (clients discover auth via `/_matrix/client/v1/auth_metadata`).
+- QR sign-in uses MSC4388 only (MSC4108 removed).

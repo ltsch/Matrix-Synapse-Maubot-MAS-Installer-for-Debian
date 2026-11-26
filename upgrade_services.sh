@@ -87,9 +87,12 @@ if [ "$CURRENT_EW" != "$EW_TAG" ]; then
     fetch_verified "$EW_URL" "$EW_SHA" "$WORKDIR/element.tar.gz"
     tar xzf "$WORKDIR/element.tar.gz" -C "$WORKDIR"
     cp /var/www/element-web/config.json "$WORKDIR/element-config.json"
+    # embedded Element Call config (pins matrix_rtc_mode)
+    cp /var/www/element-web/widgets/element-call/config.json "$WORKDIR/ec-config.json" 2>/dev/null || true
     rm -rf /var/www/element-web/*
     cp -r "$WORKDIR/element-$EW_TAG"/* /var/www/element-web/
     cp "$WORKDIR/element-config.json" /var/www/element-web/config.json
+    [ -f "$WORKDIR/ec-config.json" ] && cp "$WORKDIR/ec-config.json" /var/www/element-web/widgets/element-call/config.json
     chown -R www-data:www-data /var/www/element-web
 else
     echo "-> Element Web is up to date ($CURRENT_EW)."
