@@ -257,3 +257,19 @@ Dependencies are now tracked in `/root/registration_requirements.txt`.
 - `flask`
 - `requests`
 - `pyyaml`
+
+### 13. MatrixRTC / Element Call (LiveKit)
+Group calls in Element Web and all calls in Element X use MatrixRTC, backed by a LiveKit SFU.
+Legacy 1:1 calls still use Coturn.
+
+| Component | Service | Port | Config |
+| :--- | :--- | :--- | :--- |
+| LiveKit SFU | `livekit` (user `livekit`) | `7880` signalling (nginx `/livekit/sfu/`), `7881/tcp` + `7882/udp` media | `/etc/livekit/livekit.yaml` |
+| MatrixRTC Auth (lk-jwt-service) | `lk-jwt-service` (user `lk-jwt`) | `127.0.0.1:8083` (nginx `/livekit/jwt/`) | env in the systemd unit; keys in `/etc/lk-jwt-service/livekit_keys` |
+
+- **Firewall**: forward `7881/tcp` and `7882/udp` to this host (in addition to the Coturn ports).
+- **Synapse wiring**: lk-jwt-service runs as an *application service* (`/etc/matrix-synapse/appservices/lk-jwt-service.yaml`);
+  Synapse proxies `/_matrix/client/v1/rtc/livekit/*` to it (MSC4512) and it checks room membership via MSC4502.
+  `matrix_rtc.transports` in `homeserver.yaml` advertises the SFU; `.well-known/matrix/client` carries `org.matrix.msc4143.rtc_foci` for older clients.
+- **Dynamic IP**: LiveKit discovers its public IP at startup; `update_turn_ip.sh` restarts it when the IP changes.
+- **Upgrades**: handled by `upgrade_services.sh` (Step 4.5).

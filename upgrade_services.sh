@@ -117,6 +117,32 @@ fi
 
 echo ""
 echo "=============================================="
+echo "Step 4.5: MatrixRTC (LiveKit SFU + lk-jwt-service)"
+echo "=============================================="
+CURRENT_LK="v$(/usr/local/bin/livekit-server --version 2>/dev/null | awk '{print $3}')"
+read -r LK_TAG LK_URL LK_SHA < <(gh_asset livekit/livekit 'livekit_[0-9.]+_linux_amd64\.tar\.gz')
+if [ "$CURRENT_LK" != "$LK_TAG" ]; then
+    echo "-> Upgrading LiveKit $CURRENT_LK -> $LK_TAG (check release notes for config changes)"
+    fetch_verified "$LK_URL" "$LK_SHA" "$WORKDIR/livekit.tar.gz"
+    mkdir "$WORKDIR/lk" && tar xzf "$WORKDIR/livekit.tar.gz" -C "$WORKDIR/lk"
+    install -m 755 "$WORKDIR/lk/livekit-server" /usr/local/bin/livekit-server
+else
+    echo "-> LiveKit is up to date ($CURRENT_LK)."
+fi
+# lk-jwt-service has no --version flag; track the installed tag in a stamp file
+CURRENT_JWT=$(cat /usr/local/lib/lk-jwt-service.version 2>/dev/null || echo unknown)
+read -r JWT_TAG JWT_URL JWT_SHA < <(gh_asset element-hq/lk-jwt-service 'lk-jwt-service_linux_amd64')
+if [ "$CURRENT_JWT" != "$JWT_TAG" ]; then
+    echo "-> Upgrading lk-jwt-service $CURRENT_JWT -> $JWT_TAG (check README for new env vars)"
+    fetch_verified "$JWT_URL" "$JWT_SHA" "$WORKDIR/lk-jwt-service"
+    install -m 755 "$WORKDIR/lk-jwt-service" /usr/local/bin/lk-jwt-service
+    echo "$JWT_TAG" > /usr/local/lib/lk-jwt-service.version
+else
+    echo "-> lk-jwt-service is up to date ($CURRENT_JWT)."
+fi
+
+echo ""
+echo "=============================================="
 echo "Step 5: Maubot (Python venv)"
 echo "=============================================="
 # The maubot user cannot read /root, so stage the requirements file in /opt/maubot.
@@ -134,15 +160,16 @@ systemctl restart mas
 sleep 3
 systemctl restart matrix-synapse
 for _ in $(seq 1 30); do curl -sf http://localhost:8008/health >/dev/null && break; sleep 2; done
-systemctl restart coturn maubot mas-invite
+systemctl restart coturn maubot mas-invite livekit lk-jwt-service
 systemctl reload nginx
 
 FAILED=0
-for s in mas matrix-synapse coturn maubot mas-invite nginx postgresql; do
+for s in mas matrix-synapse coturn livekit lk-jwt-service maubot mas-invite nginx postgresql; do
     if systemctl is-active --quiet "$s"; then echo "  OK    $s"; else echo "  FAIL  $s"; FAILED=1; fi
 done
 curl -sf http://localhost:8008/health >/dev/null && echo "  OK    synapse /health" || { echo "  FAIL  synapse /health"; FAILED=1; }
 curl -sf http://localhost:8082/health >/dev/null && echo "  OK    mas /health"     || { echo "  FAIL  mas /health"; FAILED=1; }
+curl -sf http://127.0.0.1:8083/healthz >/dev/null && echo "  OK    lk-jwt /healthz" || { echo "  FAIL  lk-jwt /healthz"; FAILED=1; }
 
 echo ""
 if [ "$FAILED" -eq 0 ]; then

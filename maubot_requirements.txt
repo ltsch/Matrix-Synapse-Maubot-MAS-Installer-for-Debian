@@ -1,4 +1,5 @@
-maubot[postgres]
+maubot
+asyncpg
 python-olm
 unpaddedbase64
 pycryptodome

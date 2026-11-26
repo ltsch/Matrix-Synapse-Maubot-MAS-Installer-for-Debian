@@ -44,4 +44,6 @@ else
     echo "$WANT" >> "$CONF"
 fi
 systemctl restart coturn
-echo "$(date -Is) Coturn updated: $WANT"
+# LiveKit detects its public IP (STUN) only at startup
+if systemctl is-enabled --quiet livekit 2>/dev/null; then systemctl restart livekit; fi
+echo "$(date -Is) Coturn/LiveKit updated: $WANT"
