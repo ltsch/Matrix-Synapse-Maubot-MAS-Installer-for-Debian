@@ -273,3 +273,11 @@ Legacy 1:1 calls still use Coturn.
   `matrix_rtc.transports` in `homeserver.yaml` advertises the SFU; `.well-known/matrix/client` carries `org.matrix.msc4143.rtc_foci` for older clients.
 - **Dynamic IP**: LiveKit discovers its public IP at startup; `update_turn_ip.sh` restarts it when the IP changes.
 - **Upgrades**: handled by `upgrade_services.sh` (Step 4.5).
+
+### 14. Package Sources (newer than Debian 12 stock)
+| Component | Version source | Notes |
+| :--- | :--- | :--- |
+| PostgreSQL | `apt.postgresql.org` (PGDG, `/etc/apt/sources.list.d/pgdg.list`) | Minor updates via apt. **Major** upgrades need `pg_upgradecluster <new> <old> main` with DB clients stopped. |
+| nginx | `nginx.org` mainline (`/etc/apt/sources.list.d/nginx.list`, pinned in `/etc/apt/preferences.d/99nginx`) | Debian-style `sites-enabled/` layout kept in our `nginx.conf`; the package's `conf.d/default.conf` was removed. |
+| Coturn | Built from source into `/usr/local` by `upgrade_services.sh` | `coturn.service.d/override.conf` points systemd at `/usr/local/bin/turnserver`. DTLS is opt-in (`dtls` in `turnserver.conf`); `no-cli` no longer exists. |
+| Synapse | `packages.matrix.org` | Enabled experimental features are commented inline in `homeserver.yaml` under `experimental_features`. |

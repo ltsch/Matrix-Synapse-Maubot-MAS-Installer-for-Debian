@@ -143,6 +143,30 @@ fi
 
 echo ""
 echo "=============================================="
+echo "Step 4.6: Coturn (built from source into /usr/local)"
+echo "=============================================="
+# Debian ships an old coturn; we build upstream releases and run them via
+# /etc/systemd/system/coturn.service.d/override.conf. Read the release notes:
+# removed/renamed options make turnserver refuse to start.
+CURRENT_CT=$(/usr/local/bin/turnserver --version 2>/dev/null || echo none)
+CT_TAG=$(curl -fsS "https://api.github.com/repos/coturn/coturn/releases?per_page=20" | python3 -I -c '
+import json, re, sys
+print(next(r["tag_name"] for r in json.load(sys.stdin)
+           if not r["prerelease"] and re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", r["tag_name"])))')
+if [ "$CURRENT_CT" != "$CT_TAG" ]; then
+    echo "-> Building coturn $CURRENT_CT -> $CT_TAG (check https://github.com/coturn/coturn/releases for config changes)"
+    curl -fsSL -o "$WORKDIR/coturn.tar.gz" "https://github.com/coturn/coturn/archive/refs/tags/$CT_TAG.tar.gz"
+    tar xzf "$WORKDIR/coturn.tar.gz" -C "$WORKDIR"
+    (cd "$WORKDIR/coturn-$CT_TAG" && ./configure --prefix=/usr/local --turndbdir=/var/lib/turn >/dev/null && make -j"$(nproc)" >/dev/null)
+    for f in turnserver turnadmin turnutils_uclient turnutils_stunclient turnutils_peer turnutils_natdiscovery turnutils_oauth turnutils_rfc5769check; do
+        [ -e "$WORKDIR/coturn-$CT_TAG/bin/$f" ] && install -m 755 "$WORKDIR/coturn-$CT_TAG/bin/$f" /usr/local/bin/$f
+    done
+else
+    echo "-> Coturn is up to date ($CURRENT_CT)."
+fi
+
+echo ""
+echo "=============================================="
 echo "Step 5: Maubot (Python venv)"
 echo "=============================================="
 # The maubot user cannot read /root, so stage the requirements file in /opt/maubot.
