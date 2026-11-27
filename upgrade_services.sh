@@ -79,7 +79,8 @@ systemctl reload nginx
 
 log "Health check"
 FAILED=0
-for s in mas matrix-synapse coturn livekit lk-jwt-service maubot mas-invite nginx postgresql; do
+for s in mas matrix-synapse coturn livekit lk-jwt-service maubot mas-invite nginx postgresql \
+         matrix-turn-ip.timer matrix-monitor.timer matrix-refresh-certs.timer; do
     if systemctl is-active --quiet "$s"; then echo "  OK    $s"; else echo "  FAIL  $s"; FAILED=1; fi
 done
 for u in http://localhost:8008/health http://localhost:8082/health http://127.0.0.1:8083/healthz; do

@@ -18,9 +18,13 @@ systemctl restart <service>
 | mas, mas-invite, livekit, lk-jwt-service, maubot, coturn | `journalctl -u <service> -f` |
 | nginx | `/var/log/nginx/access.log`, `error.log` |
 | PostgreSQL | `/var/log/postgresql/postgresql-<ver>-main.log` |
-| cron jobs / timers | `/var/log/refresh_certs.log`, `matrix_monitor.log`, `update_turn_ip.log` (`matrix-turn-ip.timer`), `matrix_backup.log` |
+| scheduled jobs (`matrix-*.timer`) | `/var/log/update_turn_ip.log`, `matrix_monitor.log`, `refresh_certs.log`, `matrix_backup.log` |
 
 Restart order after config changes that touch both: `mas` → `matrix-synapse` → the rest.
+
+Scheduled jobs are systemd timers, not cron: `systemctl list-timers 'matrix-*'`. Unit
+details (users, ordering, restart policy, schedules) are in
+[ARCHITECTURE → systemd units](ARCHITECTURE.md#systemd-units).
 
 ## Users
 
@@ -105,11 +109,11 @@ pg_dropcluster <old> main && apt-get purge postgresql-<old> postgresql-client-<o
 
 `backup_matrix.sh` writes `/var/backups/matrix/<timestamp>/`: custom-format dumps of the three
 databases, `files.tgz` (configs, secrets, signing keys, nginx, units) and `media.tgz`; keeps
-14 days. **Not scheduled by default** — enable it:
+14 days. `matrix-backup.timer` (03:30 nightly) is installed but **not enabled by default**:
 
 ```bash
-./backup_matrix.sh                     # first run
-(crontab -l; echo '30 3 * * * /root/backup_matrix.sh >> /var/log/matrix_backup.log 2>&1') | crontab -
+systemctl start matrix-backup.service          # first run; check /var/log/matrix_backup.log
+systemctl enable --now matrix-backup.timer     # nightly from then on
 ```
 
 Backups are on the same disk — copy them off-host (Proxmox backup, rsync, restic).
@@ -118,7 +122,7 @@ Restore: `sudo -u postgres pg_restore --clean --if-exists -d <db> <db>.dump`;
 
 ## Certificates
 
-`refresh_certs.sh` (nightly) fetches `matrix.crt`/`matrix.key` from `CERT_SOURCE_URL`
+`refresh_certs.sh` (`matrix-refresh-certs.timer`: nightly and after boot) fetches `matrix.crt`/`matrix.key` from `CERT_SOURCE_URL`
 (`refresh_certs.conf`), installs them for nginx and coturn, reloads both. Errors appear in
 `/var/log/refresh_certs.log`. Check expiry:
 `openssl x509 -enddate -noout -in /etc/nginx/ssl/matrix.crt`.
@@ -141,8 +145,9 @@ systemctl start matrix-turn-ip.service         # run now
 
 ## Monitoring
 
-`monitor_services.sh` (every 5 min) checks all services and key endpoints and posts to
-`MONITOR_WEBHOOK_URL` on failure. Test with `./monitor_services.sh --test`.
+`monitor_services.sh` (`matrix-monitor.timer`, every 5 min) checks all services, the job
+timers and key endpoints, and posts to `MONITOR_WEBHOOK_URL` on failure (log lines are
+timestamped; the run exits 1, so it also shows in `systemctl --failed`). Test with `./monitor_services.sh --test`.
 
 ## Configuration reference
 

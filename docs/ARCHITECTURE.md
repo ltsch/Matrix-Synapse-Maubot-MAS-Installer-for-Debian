@@ -80,6 +80,51 @@ and nginx uses the same certificate (fetched from the edge by `refresh_certs.sh`
 | **Maubot** | Bot framework (admin UI at `/_matrix/maubot`) | `maubot` | pip venv | `/opt/maubot/venv` | `/opt/maubot/config.yaml` |
 | **mas-invite** | Web page that mints MAS registration tokens | `mas` | this repo (`mas-invite/`) | `/opt/mas/invite_gen.py` (system python3-flask) | `MAS_PUBLIC_BASE` in unit |
 
+## systemd units
+
+Every long-running component and every scheduled job is a systemd unit; there is no cron.
+`install.sh` writes the project's units (see `render_*` in [install.sh](../install.sh);
+`./install.sh --render-only DIR` prints them all). Package units come from Debian/upstream.
+
+### Services
+
+| Unit | Source | Runs as | Ordered after | Restart | Key settings |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `postgresql` (`postgresql@<ver>-main`) | PGDG package | `postgres` | — | no | cluster in `/etc/postgresql/<ver>/main/` |
+| `matrix-synapse` | matrix.org package | `matrix-synapse` | network | always | reads `homeserver.yaml` + `conf.d/` |
+| `mas` | `install.sh` | `mas` | postgresql | always | `MAS_CONFIG=/opt/mas/config.yaml`, cwd `/opt/mas` |
+| `mas-invite` | `install.sh` | `mas` | mas | always | `MAS_PUBLIC_BASE=https://auth.<domain>` |
+| `livekit` | `install.sh` | `livekit` | network-online | on-failure | `--config /etc/livekit/livekit.yaml` |
+| `lk-jwt-service` | `install.sh` | `lk-jwt` | livekit, matrix-synapse | on-failure | all settings as `Environment=` (`LIVEKIT_URL`, `LIVEKIT_KEY_FILE`, `LIVEKIT_JWT_BIND=127.0.0.1:8083`, `LIVEKIT_AS_REGISTRATION_FILE`, ...) |
+| `coturn` | Debian unit + `install.sh` drop-in `coturn.service.d/override.conf` | `turnserver` | network | on-failure | drop-in swaps `ExecStart` to the source-built `/usr/local/bin/turnserver` |
+| `maubot` | `install.sh` | `maubot` | postgresql, matrix-synapse | always | `/opt/maubot/venv/bin/python -m maubot`, cwd `/opt/maubot` |
+| `nginx` | nginx.org package | `root` → `www-data` workers | network | no | `nginx -t` before every reload |
+
+`After=` only orders startup; nothing hard-`Requires` another unit, so a dependency
+restarting does not take its dependents down. Restart `mas` before `matrix-synapse` when
+both changed (Synapse checks MAS at startup).
+
+### Scheduled jobs (timers)
+
+Each job is a `Type=oneshot` service running a repo script as root, plus a `.timer`. Output is
+appended to a file in `/var/log/` (and failures show in `systemctl --failed`).
+
+| Timer | Runs | Schedule | Log | Enabled by default |
+| :--- | :--- | :--- | :--- | :--- |
+| `matrix-turn-ip.timer` | `update_turn_ip.sh` | every 30 s (and 30 s after boot) | `update_turn_ip.log` | yes |
+| `matrix-monitor.timer` | `monitor_services.sh` | every 5 min (`*:0/5`) | `matrix_monitor.log` | yes |
+| `matrix-refresh-certs.timer` | `refresh_certs.sh` | 00:00 daily, 2 min after boot; catches up missed runs | `refresh_certs.log` | yes |
+| `matrix-backup.timer` | `backup_matrix.sh` (`Nice=10`, idle I/O) | 03:30 daily; catches up missed runs | `matrix_backup.log` | **no** — `systemctl enable --now matrix-backup.timer` |
+
+```bash
+systemctl list-timers 'matrix-*'            # last / next run of every job
+systemctl start matrix-monitor.service      # run a job now
+systemctl status matrix-refresh-certs.service   # result of the last run
+```
+
+`monitor_services.sh` also checks that `matrix-turn-ip.timer` and `matrix-refresh-certs.timer`
+are active, so a job that stops being scheduled raises an alert.
+
 ## Ports
 
 | Port | Proto | Bound to | Service | Exposed to internet? |

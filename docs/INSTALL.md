@@ -115,7 +115,7 @@ What `install.sh` does, in order:
 5. Latest releases of MAS, Element Web, Synapse-Admin, LiveKit, lk-jwt-service (SHA-256
    verified); coturn built from source; Maubot venv; `mas-invite` from this repo.
 6. Every config file (see `--render-only`), nginx sites, a placeholder TLS cert.
-7. MAS migrations, admin user in MAS, all services enabled; cron jobs for cert refresh,
+7. MAS migrations, admin user in MAS, all services enabled; systemd timers for cert refresh,
    monitoring and public-IP sync.
 8. Credentials → `/root/matrix_credentials.txt` (mode 600).
 
@@ -123,10 +123,11 @@ What `install.sh` does, in order:
 
 * **Certificates** — `refresh_certs.sh` downloads `$CERT_NAME.crt/.key` from
   `CERT_SOURCE_URL` (a protected endpoint on the edge that exports Caddy's certificate),
-  installs them for nginx and coturn, and reloads both. It runs nightly from cron.
+  installs them for nginx and coturn, and reloads both. `matrix-refresh-certs.timer` runs it
+  nightly and after boot.
 * **Google (or other) sign-in** — add an upstream provider to `/opt/mas/config.yaml`
   (see ADMIN_GUIDE.md → *Upstream OAuth*), then `mas config sync` and restart MAS.
-* **Backups** — enable the nightly job (ADMIN_GUIDE.md → *Backups*).
+* **Backups** — `systemctl enable --now matrix-backup.timer` (ADMIN_GUIDE.md → *Backups*).
 * **Monitoring** — set `MONITOR_WEBHOOK_URL` in `setup.config`; `./monitor_services.sh --test`.
 
 ## 6. Verify

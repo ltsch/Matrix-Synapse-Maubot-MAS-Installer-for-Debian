@@ -17,6 +17,7 @@ Debian 12 by shell scripts.
 | Post-install verification | [INSTALL §6](docs/INSTALL.md#6-verify) |
 | How components connect (diagram) | [ARCHITECTURE → Overview](docs/ARCHITECTURE.md#overview) |
 | Component / binary / config path / unit table | [ARCHITECTURE → Components](docs/ARCHITECTURE.md#components) |
+| systemd services and timers: users, ordering, restart policy, schedules | [ARCHITECTURE → systemd units](docs/ARCHITECTURE.md#systemd-units) |
 | Every listening port and who talks to it | [ARCHITECTURE → Ports](docs/ARCHITECTURE.md#ports) |
 | Login, client API, federation, MatrixRTC call flows | [ARCHITECTURE → Request flows](docs/ARCHITECTURE.md#request-flows) |
 | Which proxies are trusted for client IPs | [ARCHITECTURE → Trust boundaries](docs/ARCHITECTURE.md#trust-boundaries--client-ips) |
@@ -44,10 +45,10 @@ Debian 12 by shell scripts.
 | [lib/common.sh](lib/common.sh) | Shared helpers used by `install.sh` and `upgrade_services.sh`: logging, GitHub release lookup, SHA-256-verified downloads, per-component installers (`install_mas`, `install_element_web`, `install_livekit`, `install_lk_jwt`, `build_coturn`, ...). |
 | [upgrade_services.sh](upgrade_services.sh) | Upgrade everything in place, restart in order, health-check. |
 | [manage_users.py](manage_users.py) | User admin; every write goes through the MAS CLI. |
-| [monitor_services.sh](monitor_services.sh) | Cron health check + webhook alerts. |
-| [update_turn_ip.sh](update_turn_ip.sh) | Public-IP sync for coturn/LiveKit, run every 30 s by `matrix-turn-ip.timer` (units rendered in `render_system`). |
-| [refresh_certs.sh](refresh_certs.sh) | Cron TLS cert pull from the edge proxy. |
-| [backup_matrix.sh](backup_matrix.sh) | DB dumps + configs + media, 14-day retention. |
+| [monitor_services.sh](monitor_services.sh) | Health check + webhook alerts (`matrix-monitor.timer`, 5 min). |
+| [update_turn_ip.sh](update_turn_ip.sh) | Public-IP sync for coturn/LiveKit (`matrix-turn-ip.timer`, 30 s). |
+| [refresh_certs.sh](refresh_certs.sh) | TLS cert pull from the edge proxy (`matrix-refresh-certs.timer`, nightly + boot). |
+| [backup_matrix.sh](backup_matrix.sh) | DB dumps + configs + media, 14-day retention (`matrix-backup.timer`, disabled by default). |
 | [mas-invite/invite_gen.py](mas-invite/invite_gen.py) | Flask invite-token page (deployed to `/opt/mas/invite_gen.py`). |
 | [maubot_requirements.txt](maubot_requirements.txt) | Maubot venv packages. |
 
@@ -73,8 +74,10 @@ Debian 12 by shell scripts.
   live config, change the matching `render_*` template in `install.sh` (and the docs) too.
 * Parity check: `./install.sh --render-only /tmp/render` and diff against the live files
   (secrets render as `@NAME@` placeholders unless supplied via the environment).
-* When you add a service, port, secret or cron job, update **all** of:
-  [ARCHITECTURE](docs/ARCHITECTURE.md) (components, ports, secrets map),
+* **No cron.** Scheduled jobs are oneshot service + timer pairs created with `job_unit` /
+  `timer_unit` in `render_system` (`install.sh`).
+* When you add a service, port, secret or scheduled job, update **all** of:
+  [ARCHITECTURE](docs/ARCHITECTURE.md) (components, systemd units, ports, secrets map),
   [ADMIN_GUIDE](docs/ADMIN_GUIDE.md) (services/logs), `monitor_services.sh`,
   `upgrade_services.sh`, and the README layout table.
 

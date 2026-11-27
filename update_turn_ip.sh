@@ -44,7 +44,7 @@ fi
 
 WANT="external-ip=$PUBLIC_IP/$PRIVATE_IP"
 if grep -qx "$WANT" "$CONF"; then
-    exit 0   # unchanged; stay silent for cron
+    exit 0   # unchanged; stay silent
 fi
 
 cp "$CONF" "$CONF.bak"

@@ -32,7 +32,7 @@ Prerequisites (DNS, port forwards, edge proxy config) are in **[docs/INSTALL.md]
 ## Documentation
 
 * [docs/INSTALL.md](docs/INSTALL.md) — prerequisites, firewall ports, Caddy example, install, verify
-* [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — component diagram, ports, request flows, secrets, troubleshooting
+* [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — component diagram, systemd units and timers, ports, request flows, secrets, troubleshooting
 * [docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md) — users, upgrades, backups, certificates, configuration reference, known limitations
 * [AGENTS.md](AGENTS.md) — documentation/code map and rules for contributors and AI agents
 
@@ -44,10 +44,10 @@ Prerequisites (DNS, port forwards, edge proxy config) are in **[docs/INSTALL.md]
 | `upgrade_services.sh` | Upgrade every component + health check | manual |
 | `lib/common.sh` | Shared download/verify/build helpers | — |
 | `manage_users.py` | User admin via MAS (list/register/lock/deactivate/invite...) | manual |
-| `monitor_services.sh` | Service + endpoint checks, webhook alerts | cron */5 |
-| `update_turn_ip.sh` | Keep coturn/LiveKit public IP current | systemd timer, every 30 s (`matrix-turn-ip.timer`) |
-| `refresh_certs.sh` | Pull TLS cert from the edge, reload nginx/coturn | cron nightly |
-| `backup_matrix.sh` | DB dumps + configs + media, 14-day retention | cron nightly (enable manually) |
+| `monitor_services.sh` | Service + endpoint checks, webhook alerts | `matrix-monitor.timer`, every 5 min |
+| `update_turn_ip.sh` | Keep coturn/LiveKit public IP current | `matrix-turn-ip.timer`, every 30 s |
+| `refresh_certs.sh` | Pull TLS cert from the edge, reload nginx/coturn | `matrix-refresh-certs.timer`, nightly + boot |
+| `backup_matrix.sh` | DB dumps + configs + media, 14-day retention | `matrix-backup.timer`, nightly (enable manually) |
 | `mas-invite/invite_gen.py` | Invite-token page served at `/register` | systemd |
 | `maubot_requirements.txt` | Maubot venv packages | — |
 | `setup.config.example`, `refresh_certs.conf.example` | Site settings templates (real files are git-ignored) | — |

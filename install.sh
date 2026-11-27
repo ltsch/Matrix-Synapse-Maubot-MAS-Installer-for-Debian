@@ -7,7 +7,7 @@
 #   Element Web (+ embedded Element Call) and Synapse-Admin
 #   LiveKit SFU + lk-jwt-service               - MatrixRTC (Element Call / Element X calls)
 #   coturn (built from source)                 - TURN/STUN for legacy calls
-#   Maubot, MAS invite generator, monitoring/backup/cert/IP-sync cron jobs
+#   Maubot, MAS invite generator, monitoring/backup/cert/IP-sync systemd timers
 #
 # It assumes TLS is terminated by an edge reverse proxy (e.g. Caddy on the firewall)
 # that forwards HTTPS to this host with the original Host header. See
@@ -778,27 +778,59 @@ EOF
 APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
 EOF
-    # Public-IP sync for coturn/LiveKit every 30 s (cron cannot go below 1 min).
-    put /etc/systemd/system/matrix-turn-ip.service 644 root:root <<EOF
+    # Scheduled jobs: one oneshot service + timer each (no cron). Output is
+    # appended to /var/log/<log>; `systemctl list-timers 'matrix-*'` shows runs.
+    job_unit matrix-turn-ip update_turn_ip.sh update_turn_ip.log 1min \
+        "Sync coturn/LiveKit external IP with the current public IP"
+    timer_unit matrix-turn-ip "Check the public IP for coturn/LiveKit every 30 seconds" \
+        "OnBootSec=30s" "OnUnitActiveSec=30s" "AccuracySec=1s"
+
+    job_unit matrix-monitor monitor_services.sh matrix_monitor.log 2min \
+        "Check Matrix services and endpoints, alert via webhook"
+    timer_unit matrix-monitor "Matrix health check every 5 minutes" \
+        "OnBootSec=3min" "OnCalendar=*:0/5" "AccuracySec=10s"
+
+    job_unit matrix-refresh-certs refresh_certs.sh refresh_certs.log 5min \
+        "Fetch the TLS certificate from the edge proxy, reload nginx/coturn"
+    timer_unit matrix-refresh-certs "Refresh TLS certificate nightly and after boot" \
+        "OnBootSec=2min" "OnCalendar=*-*-* 00:00" "Persistent=true"
+
+    # Installed but NOT enabled by default: systemctl enable --now matrix-backup.timer
+    job_unit matrix-backup backup_matrix.sh matrix_backup.log infinity \
+        "Back up Matrix databases, configs and media" "Nice=10" "IOSchedulingClass=idle"
+    timer_unit matrix-backup "Nightly Matrix backup" \
+        "OnCalendar=*-*-* 03:30" "Persistent=true"
+}
+
+# job_unit NAME SCRIPT LOGFILE TIMEOUT DESCRIPTION [extra [Service] lines...]
+job_unit() {
+    local name=$1 script=$2 logf=$3 timeout=$4 desc=$5; shift 5
+    local extra=""; [ $# -gt 0 ] && extra=$(printf '%s\n' "$@")
+    put "/etc/systemd/system/$name.service" 644 root:root <<EOF
 [Unit]
-Description=Sync coturn/LiveKit external IP with the current public IP
+Description=$desc
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=$HERE/update_turn_ip.sh
-StandardOutput=append:/var/log/update_turn_ip.log
-StandardError=append:/var/log/update_turn_ip.log
+ExecStart=$HERE/$script
+TimeoutStartSec=$timeout
+StandardOutput=append:/var/log/$logf
+StandardError=append:/var/log/$logf
+$extra
 EOF
-    put /etc/systemd/system/matrix-turn-ip.timer 644 root:root <<'EOF'
+}
+
+# timer_unit NAME DESCRIPTION [Timer] lines...
+timer_unit() {
+    local name=$1 desc=$2; shift 2
+    put "/etc/systemd/system/$name.timer" 644 root:root <<EOF
 [Unit]
-Description=Check the public IP for coturn/LiveKit every 30 seconds
+Description=$desc
 
 [Timer]
-OnBootSec=30s
-OnUnitActiveSec=30s
-AccuracySec=1s
+$(printf '%s\n' "$@")
 
 [Install]
 WantedBy=timers.target
@@ -832,7 +864,7 @@ APT="apt-get -y -qq -o Dpkg::Options::=--force-confold"
 log "Base packages"
 apt-get update -qq
 $APT install curl gnupg ca-certificates lsb-release dnsutils openssl locales gettext-base \
-     python3 python3-yaml python3-flask python3-venv sudo cron logrotate unattended-upgrades \
+     python3 python3-yaml python3-flask python3-venv sudo logrotate unattended-upgrades \
      build-essential pkg-config libevent-dev libssl-dev libsqlite3-dev libsystemd-dev libmicrohttpd-dev \
      libpq-dev libolm-dev ssl-cert
 sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen && locale-gen >/dev/null
@@ -928,16 +960,16 @@ systemctl restart matrix-synapse
 for _ in $(seq 1 60); do curl -sf http://localhost:8008/health >/dev/null && break; sleep 2; done
 (cd /opt/mas && sudo -u mas MAS_CONFIG=/opt/mas/config.yaml /opt/mas/mas manage register-user "$ADMIN_USER" \
     --password "$ADMIN_PASS" --admin --yes --ignore-password-complexity) || warn "admin user not created"
-systemctl enable --now livekit lk-jwt-service maubot mas-invite coturn nginx matrix-turn-ip.timer
+systemctl enable --now livekit lk-jwt-service maubot mas-invite coturn nginx
 systemctl restart coturn nginx
 
-log "Cron jobs"
-crontab -l 2>/dev/null | grep -v -e refresh_certs.sh -e monitor_services.sh -e update_turn_ip.sh > "$WORKDIR/cron" || true
-cat >> "$WORKDIR/cron" <<EOF
-0 0 * * * $HERE/refresh_certs.sh >> /var/log/refresh_certs.log 2>&1
-*/5 * * * * $HERE/monitor_services.sh >> /var/log/matrix_monitor.log 2>&1
-EOF
-crontab "$WORKDIR/cron"
+log "Scheduled jobs (systemd timers)"
+# Drop cron entries left by older versions of this project.
+if crontab -l >/dev/null 2>&1; then
+    crontab -l | grep -v -e refresh_certs.sh -e monitor_services.sh -e update_turn_ip.sh -e backup_matrix.sh \
+        | crontab - || true
+fi
+systemctl enable --now matrix-turn-ip.timer matrix-monitor.timer matrix-refresh-certs.timer
 [ -f "$HERE/refresh_certs.conf" ] && "$HERE/refresh_certs.sh" || warn "refresh_certs.conf missing - nginx is using a self-signed placeholder cert"
 
 umask 077

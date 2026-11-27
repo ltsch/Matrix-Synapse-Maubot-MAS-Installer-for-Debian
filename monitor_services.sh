@@ -1,7 +1,7 @@
 #!/bin/bash
 # monitor_services.sh
 # Monitors Matrix services and alerts via Webhook (Discord) on failure.
-# Intended to be run via cron.
+# Run every 5 minutes by matrix-monitor.timer; silent when healthy, exits 1 on failure.
 
 set -o pipefail
 
@@ -18,7 +18,9 @@ else
 fi
 
 # Services to monitor
-SERVICES=("matrix-synapse" "mas" "mas-invite" "coturn" "livekit" "lk-jwt-service" "maubot" "nginx" "postgresql")
+# (timers included: a stopped timer means that job silently stopped running)
+SERVICES=("matrix-synapse" "mas" "mas-invite" "coturn" "livekit" "lk-jwt-service" "maubot" "nginx" "postgresql"
+          "matrix-turn-ip.timer" "matrix-refresh-certs.timer")
 
 # URLs to check (HTTP 200/301/302/404 are acceptable, Connection Refused is bad)
 : "${AUTH_FQDN:=auth.$MATRIX_FQDN}"
@@ -114,7 +116,7 @@ if [ ${#failures[@]} -gt 0 ]; then
     # Failures detected
     # Join failures with newlines
     alert_msg=$(printf -- "- %s\n" "${failures[@]}")
-    echo "Failures detected:"
+    echo "$(date -Is) Failures detected:"
     echo "$alert_msg"
     send_alert "$alert_msg"
     exit 1
