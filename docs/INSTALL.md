@@ -3,12 +3,24 @@
 > Docs: [README](../README.md) · [INSTALL](INSTALL.md) · [ARCHITECTURE](ARCHITECTURE.md) · [ADMIN_GUIDE](ADMIN_GUIDE.md) · [AGENTS](../AGENTS.md)
 
 `install.sh` builds the whole stack on a **fresh Debian 12 (bookworm)** LXC or VM. It refuses
-to run over an existing installation — use `upgrade_services.sh` for updates.
+to run over a completed installation — use `upgrade_services.sh` for updates. If an install
+fails partway, fix the cause and simply run `./install.sh` again: it reuses the secrets from
+the first attempt (`/root/.matrix-install-secrets`, deleted on success) and only creates
+database roles/databases that are missing.
 See [ARCHITECTURE.md](ARCHITECTURE.md) for how the pieces connect.
 
 ## 1. Prerequisites
 
 * Debian 12, root shell, 2+ vCPU, 4 GB+ RAM, 20 GB+ disk.
+* **Proxmox LXC**: an *unprivileged* container with the Proxmox defaults works (this
+  deployment: unprivileged, 8 vCPU, 8 GB RAM, 32 GB ZFS). No device passthrough (no TUN) is
+  needed. systemd inside the container needs `nesting=1`, the default for new containers.
+  Optionally add a mount point at `/mnt/backup` on separate storage for backups
+  (ADMIN_GUIDE → Backups). A VM works the same way.
+* **Outbound access** from the host: Debian mirrors, `packages.matrix.org`,
+  `apt.postgresql.org`, `nginx.org`, `api.github.com` + `github.com` (releases),
+  `pypi.org` (Maubot), and for public-IP discovery `resolver1.opendns.com` (DNS, UDP/53)
+  and STUN (LiveKit uses `global.stun.twilio.com:3478`).
 * A **static LAN IP** for the host (e.g. `192.168.1.100`).
 * An **edge reverse proxy** that terminates public TLS and forwards to this host
   (this project is run behind Caddy on OPNsense; any proxy works if it does the same).
@@ -34,6 +46,9 @@ Forward these from the public IP to the Matrix host:
 | 7882 | UDP | LiveKit | MatrixRTC media (UDP mux) |
 
 Port 443 is handled by the edge proxy itself; the others are plain NAT port forwards.
+**Federation also runs over 443**: nginx serves `/.well-known/matrix/server` pointing other
+servers at `chat.example.com:443`, so port 8448 is not needed (check with
+https://federationtester.matrix.org/).
 NAT reflection (hairpin) for these forwards lets LAN clients use the public address too.
 
 ## 3. Edge proxy (Caddy example)
@@ -41,6 +56,10 @@ NAT reflection (hairpin) for these forwards lets LAN clients use the public addr
 The proxy **must preserve the original `Host` header** — Caddy rewrites `Host` to the
 upstream address for HTTPS upstreams unless told otherwise, and nginx then routes every
 request to the wrong site.
+
+Caddy wildcards match **one** label: `*.example.com` covers `chat.example.com` but *not*
+`auth.chat.example.com`. Give `auth.chat.example.com` its own site block (as below) or use a
+certificate that names it (e.g. `*.chat.example.com`).
 
 ```caddy
 *.example.com {
@@ -78,18 +97,22 @@ request to the wrong site.
         }
     }
 
-    # --- Matrix Authentication Service ---------------------------------
-    @auth host auth.chat.example.com
-    handle @auth {
-        reverse_proxy https://192.168.1.100:443 {
-            header_up Host {host}
-            transport http {
-                tls_insecure_skip_verify
-            }
+}
+
+# --- Matrix Authentication Service (own block: not covered by *.example.com) ---
+auth.chat.example.com {
+    reverse_proxy https://192.168.1.100:443 {
+        header_up Host {host}
+        transport http {
+            tls_insecure_skip_verify
         }
     }
 }
 ```
+
+The `/register` page's authentication lives at the edge only: nginx does not restrict it,
+so anything that reaches nginx directly (the LAN) can mint invite tokens. If that matters,
+add `allow <EDGE_PROXY_IP>; deny all;` to `location /register` in the nginx site.
 
 After changing Caddy, make sure it actually reloaded (OPNsense: *Apply*), then test
 `curl https://chat.example.com/_matrix/client/versions` from outside.
@@ -102,22 +125,25 @@ nano setup.config                    # MATRIX_FQDN, LAN_IP, EDGE_PROXY_IP, TURN_
 cp refresh_certs.conf.example refresh_certs.conf && nano refresh_certs.conf   # optional, see §5
 
 ./install.sh --render-only /tmp/preview   # optional: inspect every config it will write
-./install.sh
+./install.sh                              # safe to re-run if it fails partway
 ```
 
 What `install.sh` does, in order:
 
-1. Base packages, locale, build tools (for coturn), `unattended-upgrades` (Debian security only).
-2. APT repos with pinned signing keys: `packages.matrix.org`, PGDG, nginx.org mainline.
-3. Synapse, newest PostgreSQL, nginx, Debian coturn (for its user/unit).
-4. Service users `mas`, `maubot`, `livekit`, `lk-jwt`; databases `synapse_db` (C collation),
-   `mas_db`, `maubot_db`.
-5. Latest releases of MAS, Element Web, Synapse-Admin, LiveKit, lk-jwt-service (SHA-256
-   verified); coturn built from source; Maubot venv; `mas-invite` from this repo.
-6. Every config file (see `--render-only`), nginx sites, a placeholder TLS cert.
-7. MAS migrations, admin user in MAS, all services enabled; systemd timers for cert refresh,
-   monitoring and public-IP sync.
-8. Credentials → `/root/matrix_credentials.txt` (mode 600).
+1. Preflight (root, bookworm, no completed install) and bootstrap tools (`dig`, `envsubst`,
+   `openssl`) before any secret is generated.
+2. Base packages, locale, build tools (for coturn), `unattended-upgrades` (Debian security only).
+3. APT repos with fingerprint-pinned signing keys: `packages.matrix.org`, PGDG, nginx.org mainline.
+4. Synapse, newest PostgreSQL, nginx, Debian coturn (for its user/unit).
+5. Service users `mas`, `maubot`, `livekit`, `lk-jwt`.
+6. Latest releases of MAS, Element Web, Synapse-Admin, LiveKit, lk-jwt-service (SHA-256
+   verified; an asset without a published digest is refused); coturn built from source;
+   Maubot venv; `mas-invite` from this repo.
+7. Databases `synapse_db` (C collation), `mas_db`, `maubot_db` (created only if missing).
+8. Every config file (see `--render-only`), nginx sites, a placeholder TLS cert.
+9. MAS migrations, admin user in MAS, all services enabled; systemd timers for cert refresh,
+   monitoring and public-IP sync (the backup timer is installed but left disabled).
+10. Credentials → `/root/matrix_credentials.txt` (mode 600).
 
 ## 5. Post-install
 
@@ -133,11 +159,27 @@ What `install.sh` does, in order:
 ## 6. Verify
 
 ```bash
-./upgrade_services.sh                                   # also a full health check
+./upgrade_services.sh --check      # health check only (services, DB, timers, nginx, endpoints)
+./monitor_services.sh --test       # webhook alert reaches your channel
 curl -s https://chat.example.com/_matrix/client/versions | head -c 100
 curl -s https://chat.example.com/_matrix/client/v1/auth_metadata | head -c 100
 curl -s https://chat.example.com/livekit/jwt/healthz
 ```
 
-Then open `https://chat.example.com`, sign in as the admin, place a call between two
-devices (one off-LAN), and check https://federationtester.matrix.org/.
+**Calls.** Check that LiveKit found the public address, then make real calls:
+
+```bash
+journalctl -u livekit | grep -E 'found external IP|using external IPs'   # public IP, not the LAN IP
+grep '^external-ip' /etc/turnserver.conf                                 # external-ip=<public>/<LAN>
+```
+
+* Element Web or Element X: start a call in a room between two accounts, one device off the
+  LAN (e.g. a phone on mobile data). Both must see and hear each other. This exercises
+  `/livekit/jwt` (token), `/livekit/sfu` (signalling) and 7881/tcp + 7882/udp (media).
+* For coturn (legacy 1:1 calls), use the WebRTC *Trickle ICE* test page with
+  `turn:chat.example.com:3478` and credentials from
+  `/_matrix/client/v3/voip/turnServer` (signed-in request); a `relay` candidate with your
+  public IP means TURN works.
+
+Then open `https://chat.example.com`, sign in as the admin, and check federation at
+https://federationtester.matrix.org/.

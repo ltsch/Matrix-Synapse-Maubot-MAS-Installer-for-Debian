@@ -33,15 +33,15 @@ Prerequisites (DNS, port forwards, edge proxy config) are in **[docs/INSTALL.md]
 
 * [docs/INSTALL.md](docs/INSTALL.md) — prerequisites, firewall ports, Caddy example, install, verify
 * [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — component diagram, systemd units and timers, ports, request flows, secrets, troubleshooting
-* [docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md) — users, upgrades, backups, certificates, configuration reference, known limitations
+* [docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md) — users, upgrades and rollback, backups, rebuild/restore, secret rotation, certificates, public IP, monitoring, configuration reference, known limitations
 * [AGENTS.md](AGENTS.md) — documentation/code map and rules for contributors and AI agents
 
 ## Repository layout
 
 | Path | Purpose | Schedule |
 | :--- | :--- | :--- |
-| `install.sh` | Fresh install; `--render-only DIR` writes all configs for review | once |
-| `upgrade_services.sh` | Upgrade every component + health check | manual |
+| `install.sh` | Fresh install (safe to re-run if it fails); `--render-only DIR` writes all configs for review | once |
+| `upgrade_services.sh` | Back up, upgrade every component, health check; `--check` = health check only | manual |
 | `lib/common.sh` | Shared download/verify/build helpers | — |
 | `manage_users.py` | User admin via MAS (list/register/lock/deactivate/invite...) | manual |
 | `monitor_services.sh` | Service + endpoint checks, webhook alerts | `matrix-monitor.timer`, every 5 min |

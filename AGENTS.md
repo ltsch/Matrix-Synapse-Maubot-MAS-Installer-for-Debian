@@ -11,10 +11,12 @@ Debian 12 by shell scripts.
 | :--- | :--- |
 | What this is, versions validated, repo layout | [README.md](README.md) |
 | Prerequisites, DNS, port forwards, edge-proxy (Caddy) config, install steps | [docs/INSTALL.md](docs/INSTALL.md) |
+| Host requirements (LXC, resources, outbound access) | [INSTALL §1](docs/INSTALL.md#1-prerequisites) |
 | Firewall / NAT ports to forward | [INSTALL §2](docs/INSTALL.md#2-firewall--port-forwarding) |
 | Edge proxy requirements (`Host` header!) | [INSTALL §3](docs/INSTALL.md#3-edge-proxy-caddy-example) |
 | What `install.sh` does, step by step | [INSTALL §4](docs/INSTALL.md#4-configure-and-install) |
-| Post-install verification | [INSTALL §6](docs/INSTALL.md#6-verify) |
+| Post-install steps (certs, OAuth, backups, monitoring) | [INSTALL §5](docs/INSTALL.md#5-post-install) |
+| Post-install verification, including calls | [INSTALL §6](docs/INSTALL.md#6-verify) |
 | How components connect (diagram) | [ARCHITECTURE → Overview](docs/ARCHITECTURE.md#overview) |
 | Component / binary / config path / unit table | [ARCHITECTURE → Components](docs/ARCHITECTURE.md#components) |
 | systemd services and timers: users, ordering, restart policy, schedules | [ARCHITECTURE → systemd units](docs/ARCHITECTURE.md#systemd-units) |
@@ -27,8 +29,11 @@ Debian 12 by shell scripts.
 | User management (always via MAS) | [ADMIN_GUIDE → Users](docs/ADMIN_GUIDE.md#users) |
 | Google / upstream OAuth in MAS | [ADMIN_GUIDE → Upstream OAuth](docs/ADMIN_GUIDE.md#upstream-oauth-eg-google-sign-in) |
 | Upgrading components; breaking-change sources | [ADMIN_GUIDE → Upgrades](docs/ADMIN_GUIDE.md#upgrades) |
+| Rolling back a bad upgrade (`*.prev`, apt pin) | [ADMIN_GUIDE → Rollback](docs/ADMIN_GUIDE.md#rollback) |
 | PostgreSQL major-version upgrade | [ADMIN_GUIDE → PostgreSQL major upgrade](docs/ADMIN_GUIDE.md#postgresql-major-upgrade-manual) |
-| Backups and restore | [ADMIN_GUIDE → Backups](docs/ADMIN_GUIDE.md#backups) |
+| Backups | [ADMIN_GUIDE → Backups](docs/ADMIN_GUIDE.md#backups) |
+| Rebuild on a new host / restore from backup | [ADMIN_GUIDE → Rebuild / restore](docs/ADMIN_GUIDE.md#rebuild--restore-on-a-new-host) |
+| Rotating each secret | [ADMIN_GUIDE → Rotating secrets](docs/ADMIN_GUIDE.md#rotating-secrets) |
 | TLS certificate refresh | [ADMIN_GUIDE → Certificates](docs/ADMIN_GUIDE.md#certificates) |
 | Public-IP tracking for coturn/LiveKit | [ADMIN_GUIDE → Public IP changes](docs/ADMIN_GUIDE.md#public-ip-changes) |
 | Monitoring / alert webhook | [ADMIN_GUIDE → Monitoring](docs/ADMIN_GUIDE.md#monitoring) |
@@ -43,7 +48,7 @@ Debian 12 by shell scripts.
 | :--- | :--- |
 | [install.sh](install.sh) | Fresh install. All config templates live here as `render_*` functions (`render_synapse`, `render_mas`, `render_coturn`, `render_livekit`, `render_maubot`, `render_web`, `render_nginx`, `render_system`). `--render-only DIR` writes every config without touching the system. |
 | [lib/common.sh](lib/common.sh) | Shared helpers used by `install.sh` and `upgrade_services.sh`: logging, GitHub release lookup, SHA-256-verified downloads, per-component installers (`install_mas`, `install_element_web`, `install_livekit`, `install_lk_jwt`, `build_coturn`, ...). |
-| [upgrade_services.sh](upgrade_services.sh) | Upgrade everything in place, restart in order, health-check. |
+| [upgrade_services.sh](upgrade_services.sh) | Resolve releases, back up, upgrade, restart in order, health-check; `--check` only checks. |
 | [manage_users.py](manage_users.py) | User admin; every write goes through the MAS CLI. |
 | [monitor_services.sh](monitor_services.sh) | Health check + webhook alerts (`matrix-monitor.timer`, 5 min). |
 | [update_turn_ip.sh](update_turn_ip.sh) | Public-IP sync for coturn/LiveKit (`matrix-turn-ip.timer`, 30 s). |
