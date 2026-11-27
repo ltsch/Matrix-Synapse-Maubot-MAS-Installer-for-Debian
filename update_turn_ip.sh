@@ -63,8 +63,21 @@ if [ -z "$PUBLIC_IP" ]; then
 fi
 
 WANT="external-ip=$PUBLIC_IP/$PRIVATE_IP"
+RESTART_NEEDED=/run/matrix-turn-ip.restart-needed
+exec 9>/run/matrix-turn-ip.lock; flock -n 9 || exit 0   # a manual run overlapping the timer
+
+restart_services() {
+    # Both, even if one fails; keep a marker so the next run retries until both succeed.
+    local ok=true
+    systemctl restart coturn || ok=false
+    # LiveKit detects its public IP (STUN) only at startup
+    if systemctl is-enabled --quiet livekit 2>/dev/null; then systemctl restart livekit || ok=false; fi
+    if $ok; then rm -f "$RESTART_NEEDED"; else touch "$RESTART_NEEDED"; echo "$(date -Is) ERROR: restart failed; retrying next run"; return 1; fi
+}
+
 if grep -qx "$WANT" "$CONF"; then
     rm -f "$PENDING"
+    if [ -e "$RESTART_NEEDED" ]; then restart_services && echo "$(date -Is) Restart retry succeeded"; exit $?; fi
     exit 0   # unchanged; stay silent
 fi
 
@@ -83,7 +96,6 @@ if grep -q '^#\? *external-ip=' "$CONF"; then
 else
     echo "$WANT" >> "$CONF"
 fi
-systemctl restart coturn
-# LiveKit detects its public IP (STUN) only at startup
-if systemctl is-enabled --quiet livekit 2>/dev/null; then systemctl restart livekit; fi
+touch "$RESTART_NEEDED"
+restart_services
 echo "$(date -Is) Coturn/LiveKit updated: $WANT"

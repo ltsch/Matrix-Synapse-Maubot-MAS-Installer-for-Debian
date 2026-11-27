@@ -54,7 +54,8 @@ if [ -z "$RENDER_DIR" ]; then
     done
     if [ ${#need[@]} -gt 0 ]; then
         log "Installing bootstrap tools: ${need[*]}"
-        apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${need[@]}"
+        apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${need[@]}"
     fi
 fi
 
@@ -860,7 +861,7 @@ job_unit() {
     put "/etc/systemd/system/$name.service" 644 root:root <<EOF
 [Unit]
 Description=$desc
-After=network-online.target
+After=network-online.target postgresql.service
 Wants=network-online.target
 
 [Service]
@@ -932,7 +933,8 @@ add_repo_key https://nginx.org/keys/nginx_signing.key /usr/share/keyrings/nginx-
 echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/mainline/debian bookworm nginx" > /etc/apt/sources.list.d/nginx.list
 printf 'Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 900\n' > /etc/apt/preferences.d/99nginx
 apt-get update -qq
-PG_MAJOR=$(apt-cache search --names-only '^postgresql-[0-9]+$' | grep -oP '^postgresql-\K[0-9]+' | sort -n | tail -1)
+PG_MAJOR=$(apt-cache search --names-only '^postgresql-[0-9]+$' | grep -oP '^postgresql-\K[0-9]+' | sort -n | tail -1 || true)
+[ -n "$PG_MAJOR" ] || die "no postgresql-<N> package found (is the PGDG repository reachable?)"
 echo "matrix-synapse-py3 matrix-synapse/server-name string $MATRIX_FQDN" | debconf-set-selections
 echo "matrix-synapse-py3 matrix-synapse/report-stats boolean false" | debconf-set-selections
 $APT install matrix-synapse-py3 "postgresql-$PG_MAJOR" nginx coturn
@@ -952,7 +954,8 @@ install_lk_jwt "$WORKDIR"
 COTURN_TAG=$(latest_coturn_tag) || die "could not look up the latest coturn release"
 build_coturn "$WORKDIR" "$COTURN_TAG"
 install -m 644 "$HERE/mas-invite/invite_gen.py" /opt/mas/invite_gen.py
-chown -R root:root /opt/mas   # binaries root-owned; only config.yaml belongs to mas
+# Binaries root-owned; config.yaml (if a previous attempt wrote it) stays the mas user's.
+chown -R root:root /opt/mas/mas /opt/mas/share /opt/mas/invite_gen.py
 
 log "PostgreSQL $PG_MAJOR databases"
 # Idempotent: a re-run after a failure updates passwords instead of failing on CREATE.
@@ -1025,11 +1028,13 @@ if crontab -l >/dev/null 2>&1; then
     crontab -l | grep -v -e refresh_certs.sh -e monitor_services.sh -e update_turn_ip.sh -e backup_matrix.sh \
         | crontab - || true
 fi
-systemctl enable --now matrix-turn-ip.timer matrix-monitor.timer matrix-refresh-certs.timer
+systemctl enable --now matrix-turn-ip.timer matrix-monitor.timer
 if [ -f "$HERE/refresh_certs.conf" ]; then
+    systemctl enable --now matrix-refresh-certs.timer
     "$HERE/refresh_certs.sh" || warn "refresh_certs.sh failed - nginx is using a self-signed placeholder cert (see output above)"
 else
-    warn "refresh_certs.conf missing - nginx is using a self-signed placeholder cert"
+    warn "refresh_certs.conf missing - nginx is using a self-signed placeholder cert;" \
+         "matrix-refresh-certs.timer left disabled (create the file, then: systemctl enable --now matrix-refresh-certs.timer)"
 fi
 
 umask 077

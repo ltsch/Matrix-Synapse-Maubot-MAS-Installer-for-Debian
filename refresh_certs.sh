@@ -37,10 +37,15 @@ mkdir -p "$DEST_DIR"
 fail() { echo "$(date -Is) Error: $*"; exit 1; }
 
 echo "$(date -Is) Fetching certificate for $CERT_NAME..."
-curl -m 10 -sS -f -o "$TEMP_DIR/new.crt" "$CERT_SOURCE_URL/$CERT_NAME.crt" || fail "download of $CERT_NAME.crt failed"
-curl -m 10 -sS -f -o "$TEMP_DIR/new.key" "$CERT_SOURCE_URL/$CERT_NAME.key" || fail "download of $CERT_NAME.key failed"
+# Retries cover a short edge/LAN blip (e.g. right after boot) instead of failing for a day.
+fetch() { curl -m 10 -sS -f --retry 3 --retry-delay 5 --retry-all-errors -o "$TEMP_DIR/$2" "$CERT_SOURCE_URL/$1"; }
+fetch "$CERT_NAME.crt" new.crt || fail "download of $CERT_NAME.crt failed"
+fetch "$CERT_NAME.key" new.key || fail "download of $CERT_NAME.key failed"
 
-if cmp -s "$TEMP_DIR/new.crt" "$CRT" && cmp -s "$TEMP_DIR/new.key" "$KEY"; then
+# "Unchanged" only if nginx AND coturn already have this pair, so a run that failed
+# halfway (nginx updated, coturn not) is completed by the next run.
+if cmp -s "$TEMP_DIR/new.crt" "$CRT" && cmp -s "$TEMP_DIR/new.key" "$KEY" \
+   && cmp -s "$TEMP_DIR/new.crt" "$TURN_CRT" && cmp -s "$TEMP_DIR/new.key" "$TURN_KEY"; then
     echo "Certificates are unchanged. No action taken."
     exit 0
 fi

@@ -86,11 +86,13 @@ mapfile -t PG_UNITS < <(systemctl list-units --all --plain --no-legend 'postgres
 for u in "${PG_UNITS[@]}"; do
     systemctl is-active --quiet "$u" || failures+=("Service **$u** is not active")
 done
-pg_isready -q -t 5 || failures+=("PostgreSQL is not accepting connections")
+# -U/-d postgres: otherwise the probe connects as "root" and PostgreSQL logs a FATAL each run
+pg_isready -q -t 5 -U postgres -d postgres || failures+=("PostgreSQL is not accepting connections")
 
-# 3. Any failed unit (e.g. a scheduled job whose last run failed), except this monitor itself
+# 3. Any failed unit (e.g. a scheduled job whose last run failed). A previous monitor run
+#    that crashed shows up here too (finding problems exits 1, which the unit treats as success).
 while read -r u; do
-    [ -n "$u" ] && [ "$u" != "matrix-monitor.service" ] && failures+=("Unit **$u** failed (systemctl status $u)")
+    [ -n "$u" ] && failures+=("Unit **$u** failed (systemctl status $u)")
 done < <(systemctl list-units --state=failed --plain --no-legend | awk '{print $1}')
 
 # 4. Backups - only once matrix-backup.timer is enabled. A backup counts only if it completed.

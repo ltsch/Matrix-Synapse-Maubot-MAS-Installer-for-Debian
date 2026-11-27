@@ -80,10 +80,12 @@ print(next(r["tag_name"] for r in json.load(sys.stdin)
 keep_prev() { if [ -f "$1" ]; then cp -p "$1" "$1.prev"; fi; }
 
 # swap_dir <new-dir> <live-dir> - replace a directory by rename, keeping <live-dir>.prev
+# (the old .prev is only deleted once the new directory is in place)
 swap_dir() {
-    rm -rf "$2.prev"
-    if [ -d "$2" ]; then mv "$2" "$2.prev"; fi
+    if [ -d "$2" ]; then rm -rf "$2.old" && mv "$2" "$2.old"; fi
     mv "$1" "$2"
+    rm -rf "$2.prev"
+    if [ -d "$2.old" ]; then mv "$2.old" "$2.prev"; fi
 }
 
 # --- Component installers -----------------------------------------------------

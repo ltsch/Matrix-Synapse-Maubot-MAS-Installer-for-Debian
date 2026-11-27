@@ -44,6 +44,10 @@ for arg in "$@"; do
     esac
 done
 [ "$EUID" -eq 0 ] || die "run as root"
+if ! $CHECK_ONLY; then
+    exec 8>/run/matrix-upgrade.lock
+    flock -n 8 || die "another upgrade_services.sh is running"
+fi
 
 SERVICES=(mas matrix-synapse coturn livekit lk-jwt-service maubot mas-invite nginx)
 TIMERS=(matrix-turn-ip.timer matrix-monitor.timer matrix-refresh-certs.timer)
@@ -69,7 +73,7 @@ health_check() {
     while read -r u; do
         if systemctl is-active --quiet "$u"; then ok "$u"; else bad "$u"; fi
     done < <(systemctl list-units --all --plain --no-legend 'postgresql@*.service' | awk '{print $1}')
-    if pg_isready -q -t 5; then ok "PostgreSQL accepting connections"; else bad "PostgreSQL accepting connections"; fi
+    if pg_isready -q -t 5 -U postgres -d postgres; then ok "PostgreSQL accepting connections"; else bad "PostgreSQL accepting connections"; fi
     while read -r u; do
         if [ -n "$u" ]; then bad "unit $u is in failed state"; fi
     done < <(systemctl list-units --state=failed --plain --no-legend | awk '{print $1}')
@@ -117,13 +121,23 @@ fi
 
 WORKDIR=$(mktemp -d)
 CHANGED=()
-# Pause the 5-minute monitor: restarts would otherwise raise (and then resolve) alerts.
-MONITOR_PAUSED=false
-if systemctl is-active --quiet matrix-monitor.timer; then systemctl stop matrix-monitor.timer; MONITOR_PAUSED=true; fi
+# Pause the jobs that would interfere: the monitor (restarts would raise and resolve
+# alerts), IP sync (could restart coturn/LiveKit mid-upgrade), backup (we take our own).
+PAUSED=()
+pause_timers() {
+    local t
+    for t in matrix-monitor.timer matrix-turn-ip.timer matrix-backup.timer; do
+        if systemctl is-active --quiet "$t"; then systemctl stop "$t"; PAUSED+=("$t"); fi
+    done
+}
+resume_timers() {
+    if [ ${#PAUSED[@]} -gt 0 ]; then systemctl start "${PAUSED[@]}" || true; PAUSED=(); fi
+}
+pause_timers
 on_exit() {
     local rc=$1
     rm -rf "$WORKDIR"
-    if $MONITOR_PAUSED; then systemctl start matrix-monitor.timer || true; fi
+    resume_timers
     if [ "$rc" -ne 0 ] && [ ${#CHANGED[@]} -gt 0 ]; then
         warn "upgrade stopped with an error after changing: ${CHANGED[*]}"
         warn "restarting services on what is installed now; rollback: docs/ADMIN_GUIDE.md -> Upgrades -> Rollback"
@@ -155,6 +169,18 @@ printf '  %-16s %-14s -> %s\n' MAS "$CUR_MAS" "${MAS[0]}" "Element Web" "$CUR_EW
     Synapse-Admin "$CUR_SA" "${SA[0]}" LiveKit "$CUR_LK" "${LK[0]}" lk-jwt-service "$CUR_JWT" "${JWT[0]}" \
     coturn "$CUR_COTURN" "$COTURN_TAG"
 
+# Refuse, before anything changes, to install a needed asset that has no published digest.
+if [ "${ALLOW_UNVERIFIED:-0}" != 1 ]; then
+    for c in "MAS:$CUR_MAS:${MAS[0]}:${MAS[2]}" "Element Web:$CUR_EW:${EW[0]}:${EW[2]}" \
+             "Synapse-Admin:$CUR_SA:${SA[0]}:${SA[2]}" "LiveKit:$CUR_LK:${LK[0]}:${LK[2]}" \
+             "lk-jwt-service:$CUR_JWT:${JWT[0]}:${JWT[2]}"; do
+        IFS=: read -r name cur new sha <<<"$c"
+        if [ "$cur" != "$new" ] && [ -z "$sha" ]; then
+            die "$name $new has no published SHA-256 digest; nothing was changed (ALLOW_UNVERIFIED=1 to override)"
+        fi
+    done
+fi
+
 # --- 3. Backup ----------------------------------------------------------------------
 if $BACKUP; then
     log "Pre-upgrade backup"
@@ -175,8 +201,9 @@ if ! systemctl is-active --quiet nginx; then warn "nginx was stopped by the pack
 # --- 5. Components --------------------------------------------------------------------
 log "Matrix Authentication Service"
 if [ "$CUR_MAS" != "${MAS[0]}" ]; then
-    install_mas "$WORKDIR" "${MAS[@]}" >/dev/null     # validates config with the new binary first
     CHANGED+=(mas)
+    install_mas "$WORKDIR" "${MAS[@]}" >/dev/null     # validates config with the new binary first
+    systemctl stop mas mas-invite                     # no old MAS serving during the migration
     (cd /opt/mas && sudo -u mas MAS_CONFIG=/opt/mas/config.yaml /opt/mas/mas database migrate)
 else log "  up to date ($CUR_MAS)"; fi
 
@@ -204,6 +231,8 @@ log "Maubot (Python venv)"
 # The maubot user cannot read /root, so stage the requirements file in /opt/maubot.
 install -m 644 "$HERE/maubot_requirements.txt" /opt/maubot/requirements.txt
 CHANGED+=(maubot)
+# Snapshot for rollback: pip install -r /opt/maubot/requirements.prev.txt
+/opt/maubot/venv/bin/pip freeze > /opt/maubot/requirements.prev.txt
 sudo -H -u maubot /opt/maubot/venv/bin/pip install -q --upgrade pip
 sudo -H -u maubot /opt/maubot/venv/bin/pip install -q --upgrade -r /opt/maubot/requirements.txt
 /opt/maubot/venv/bin/pip check >/dev/null
@@ -211,6 +240,6 @@ sudo -H -u maubot /opt/maubot/venv/bin/pip install -q --upgrade -r /opt/maubot/r
 # --- 6. Restart + health ----------------------------------------------------------------
 restart_all
 CHANGED=()   # from here on a failure is reported by the health check, not the exit trap
-if $MONITOR_PAUSED; then systemctl start matrix-monitor.timer; MONITOR_PAUSED=false; fi
+resume_timers
 health_check || die "upgrade finished WITH FAILURES - check: journalctl -u <service> -n 50"
 log "Upgrade complete. All services healthy."
