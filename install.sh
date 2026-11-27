@@ -216,8 +216,9 @@ experimental_features:
   msc4512_enabled: true   # proxy /rtc/livekit to the appservice
   msc4354_enabled: true   # sticky events: lets Element Call use 'Matrix 2.0' MatrixRTC mode
   msc4075_enabled: true   # push rules for MatrixRTC call invites / ringing
-  # Sign in with QR code (MSC4388)
-  msc4388_mode: open      # 'open' lets the new device create the rendezvous; rate-limited, 2m TTL
+  # Sign in with QR code: both rendezvous versions, so apps can use whichever they support.
+  msc4108_enabled: true   # 2024 version (MSC4108) - what current Element X / Element Web use
+  msc4388_mode: open      # 2025 version (MSC4388, accepted 2026-11); 'open' = new device creates the rendezvous, rate-limited, 2m TTL
   msc4133_enabled: true   # custom profile fields (e.g. timezone)
   # Newer client features (Element Web / Element X)
   msc4306_enabled: true   # thread subscriptions (+ sliding sync extension)

@@ -401,12 +401,16 @@ short blip produces an alert and then a RESOLVED message.
 * Synapse advertises only the stable `m.livekit` MatrixRTC transport.
 * `.well-known/matrix/client` carries only `m.homeserver`; clients find MAS via
   `/_matrix/client/v1/auth_metadata`.
-* QR-code sign-in uses MSC4388 (`msc4388_mode: open`).
+* QR-code sign-in: both rendezvous versions are on — `msc4108_enabled` (2024 version, used by
+  current Element X / Element Web) and `msc4388_mode: open` (2025 version, accepted into the spec
+  2026-11). Drop MSC4108 once the apps have moved to MSC4388. To sign in a phone: Element Web/Desktop →
+  *Settings → Sessions → Link new device*, or on Element X choose *Sign in with QR code* and scan
+  the code shown by a device that is already signed in.
 * No identity server is configured (no `vector.im`); invites by email address are not available.
 
 ### Synapse experimental features
 Enabled (all commented inline in `homeserver.yaml`): MatrixRTC (`msc4143`, `msc4502`,
-`msc4512`, `msc4354`, `msc4075`), QR login (`msc4388`), profile fields (`msc4133`),
+`msc4512`, `msc4354`, `msc4075`), QR login (`msc4108`, `msc4388`), profile fields (`msc4133`),
 dehydrated devices (`msc3814`), threads (`msc4306`, `msc3773`), push rules (`msc3664`,
 `msc3381_polls`), invite filtering (`msc4155`), auto-forget (`msc4267`), redact on
 kick/ban (`msc4293`), mark unread (`msc4446`), busy presence (`msc3026`), moderator view
