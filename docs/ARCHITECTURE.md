@@ -114,7 +114,7 @@ appended to a file in `/var/log/` (and failures show in `systemctl --failed`).
 | `matrix-turn-ip.timer` | `update_turn_ip.sh` | every 30 s (and 30 s after boot) | `update_turn_ip.log` | yes |
 | `matrix-monitor.timer` | `monitor_services.sh` | every 5 min (`*:0/5`) | `matrix_monitor.log` | yes |
 | `matrix-refresh-certs.timer` | `refresh_certs.sh` | 00:00 daily, 2 min after boot; catches up missed runs | `refresh_certs.log` | yes |
-| `matrix-backup.timer` | `backup_matrix.sh` (`Nice=10`, idle I/O) | 03:30 daily; catches up missed runs | `matrix_backup.log` | **no** — `systemctl enable --now matrix-backup.timer` |
+| `matrix-backup.timer` | `backup_matrix.sh` (`Nice=10`, idle I/O) → `BACKUP_DIR` | 03:30 daily; catches up missed runs | `matrix_backup.log` | **no** — `systemctl enable --now matrix-backup.timer` |
 
 ```bash
 systemctl list-timers 'matrix-*'            # last / next run of every job
@@ -123,7 +123,8 @@ systemctl status matrix-refresh-certs.service   # result of the last run
 ```
 
 `monitor_services.sh` also checks that `matrix-turn-ip.timer` and `matrix-refresh-certs.timer`
-are active, so a job that stops being scheduled raises an alert.
+are active, and, once `matrix-backup.timer` is enabled, that it is active and a backup newer
+than 36 h exists — so a job that stops running raises an alert.
 
 ## Ports
 

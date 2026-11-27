@@ -107,18 +107,28 @@ pg_dropcluster <old> main && apt-get purge postgresql-<old> postgresql-client-<o
 
 ## Backups
 
-`backup_matrix.sh` writes `/var/backups/matrix/<timestamp>/`: custom-format dumps of the three
-databases, `files.tgz` (configs, secrets, signing keys, nginx, units) and `media.tgz`; keeps
-14 days. `matrix-backup.timer` (03:30 nightly) is installed but **not enabled by default**:
+`backup_matrix.sh` writes `$BACKUP_DIR/<timestamp>/` (`BACKUP_DIR` in `setup.config`,
+default `/mnt/backup/matrix`): `globals.sql` (database roles and passwords), custom-format
+dumps of the three databases, `files.tgz` (configs, secrets, signing keys, nginx, systemd
+units, `setup.config`) and `media.tgz`; keeps 14 days. `matrix-backup.timer` (03:30 nightly)
+is installed but **not enabled by default** (it is enabled on the reference deployment):
 
 ```bash
 systemctl start matrix-backup.service          # first run; check /var/log/matrix_backup.log
 systemctl enable --now matrix-backup.timer     # nightly from then on
 ```
 
-Backups are on the same disk — copy them off-host (Proxmox backup, rsync, restic).
-Restore: `sudo -u postgres pg_restore --clean --if-exists -d <db> <db>.dump`;
-`tar xzf files.tgz -C /`; `tar xzf media.tgz -C /`; restart services.
+Once enabled, `monitor_services.sh` alerts if the timer stops or the newest backup is older
+than 36 h.
+
+`/mnt/backup` is a plain directory on the container's own disk until you give it separate
+storage — e.g. a Proxmox mount point (`pct set <vmid> -mp0 <storage>:<size>,mp=/mnt/backup`)
+— and copy backups off-host too (Proxmox Backup Server, rsync, restic).
+
+Restore, in order: `tar xzf files.tgz -C /`; `sudo -u postgres psql -f globals.sql` (roles);
+`sudo -u postgres pg_restore --clean --if-exists -d <db> <db>.dump` for each database
+(create it first on a fresh server; `synapse_db` with `C` collation); `tar xzf media.tgz -C /`;
+restart services (`mas` → `matrix-synapse` → the rest).
 
 ## Certificates
 

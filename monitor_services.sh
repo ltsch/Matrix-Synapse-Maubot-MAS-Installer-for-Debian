@@ -97,6 +97,13 @@ for svc in "${SERVICES[@]}"; do
     fi
 done
 
+# 1b. Backups: only once matrix-backup.timer has been enabled
+if systemctl is-enabled --quiet matrix-backup.timer 2>/dev/null; then
+    systemctl is-active --quiet matrix-backup.timer || failures+=("Timer **matrix-backup.timer** is INACTIVE")
+    latest=$(find "${BACKUP_DIR:-/mnt/backup/matrix}" -mindepth 1 -maxdepth 1 -type d -mmin -2160 2>/dev/null | head -n 1)
+    [ -n "$latest" ] || failures+=("No backup newer than 36 h in **${BACKUP_DIR:-/mnt/backup/matrix}**")
+fi
+
 # 2. Check URL Endpoints (Only if Nginx is up)
 if systemctl is-active --quiet nginx; then
     for url in "${URLS[@]}"; do

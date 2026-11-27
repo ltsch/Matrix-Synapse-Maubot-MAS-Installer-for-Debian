@@ -35,6 +35,10 @@ SMTP_REPLY_TO=""             # defaults to SMTP_FROM
 ELEMENT_COUNTRY_CODE="US"    # default for phone-number entry
 # MAPTILER_KEY=""            # enables location-sharing maps
 
+# --- Backups (backup_matrix.sh / matrix-backup.timer) ------------------------
+# Make /mnt/backup a mount point on separate storage (e.g. Proxmox mp0).
+BACKUP_DIR="/mnt/backup/matrix"
+
 # --- Monitoring (monitor_services.sh) ----------------------------------------
 # Discord-compatible webhook for alerts (leave empty to only log)
 MONITOR_WEBHOOK_URL=""
