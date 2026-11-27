@@ -51,6 +51,8 @@ Prerequisites (DNS, port forwards, edge proxy config) are in **[docs/INSTALL.md]
 | `mas-invite/invite_gen.py` | Invite-token page served at `/register` | systemd |
 | `maubot_requirements.txt` | Maubot venv packages | — |
 | `setup.config.example`, `refresh_certs.conf.example` | Site settings templates (real files are git-ignored) | — |
+| `docs/` | INSTALL, ARCHITECTURE, ADMIN_GUIDE | — |
+| `AGENTS.md` | Documentation/code map and rules for contributors and agents | — |
 
 ## Credits
 

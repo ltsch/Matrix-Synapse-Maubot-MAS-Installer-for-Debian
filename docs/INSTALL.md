@@ -19,8 +19,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for how the pieces connect.
   (ADMIN_GUIDE → Backups). A VM works the same way.
 * **Outbound access** from the host: Debian mirrors, `packages.matrix.org`,
   `apt.postgresql.org`, `nginx.org`, `api.github.com` + `github.com` (releases),
-  `pypi.org` (Maubot), and for public-IP discovery `resolver1.opendns.com` (DNS, UDP/53)
-  and STUN (LiveKit uses `global.stun.twilio.com:3478`).
+  `pypi.org` (Maubot), and for public-IP discovery `resolver1.opendns.com` (DNS, UDP/53),
+  `ifconfig.me` (fallback) and STUN (LiveKit uses `global.stun.twilio.com:3478`).
 * A **static LAN IP** for the host (e.g. `192.168.1.100`).
 * An **edge reverse proxy** that terminates public TLS and forwards to this host
   (this project is run behind Caddy on OPNsense; any proxy works if it does the same).
@@ -79,9 +79,9 @@ certificate that names it (e.g. `*.chat.example.com`).
             }
         }
         # Invite-token page: put authentication in front of it
-        # (this deployment uses caddy-security: `authorize with <policy>`)
+        # (e.g. the caddy-security plugin: `authorize with <policy>`)
         handle /register* {
-            # authorize with discord
+            # authorize with <policy>
             reverse_proxy https://192.168.1.100:443 {
                 header_up Host {host}
                 transport http {
@@ -120,9 +120,11 @@ After changing Caddy, make sure it actually reloaded (OPNsense: *Apply*), then t
 ## 4. Configure and install
 
 ```bash
+git clone <this repository> /root/matrix && cd /root/matrix   # any path works; this deployment uses /root
 cp setup.config.example setup.config && chmod 600 setup.config
-nano setup.config                    # MATRIX_FQDN, LAN_IP, EDGE_PROXY_IP, TURN_DDNS_HOST, SMTP_*...
-cp refresh_certs.conf.example refresh_certs.conf && nano refresh_certs.conf   # optional, see §5
+nano setup.config                    # see the comments in the file for every setting
+cp refresh_certs.conf.example refresh_certs.conf && chmod 600 refresh_certs.conf
+nano refresh_certs.conf              # see §5; without it the cert-refresh timer stays disabled
 
 ./install.sh --render-only /tmp/preview   # optional: inspect every config it will write
 ./install.sh                              # safe to re-run if it fails partway
@@ -130,8 +132,8 @@ cp refresh_certs.conf.example refresh_certs.conf && nano refresh_certs.conf   # 
 
 What `install.sh` does, in order:
 
-1. Preflight (root, bookworm, no completed install) and bootstrap tools (`dig`, `envsubst`,
-   `openssl`) before any secret is generated.
+1. Preflight (root, bookworm, no completed install) and any missing bootstrap tools (`dig`,
+   `envsubst`, `openssl`, `ip`, `python3`, `curl`) before any secret is generated.
 2. Base packages, locale, build tools (for coturn), `unattended-upgrades` (Debian security only).
 3. APT repos with fingerprint-pinned signing keys: `packages.matrix.org`, PGDG, nginx.org mainline.
 4. Synapse, newest PostgreSQL, nginx, Debian coturn (for its user/unit).
@@ -148,7 +150,8 @@ What `install.sh` does, in order:
 ## 5. Post-install
 
 * **Certificates** — `refresh_certs.sh` downloads `$CERT_NAME.crt/.key` from
-  `CERT_SOURCE_URL` (a protected endpoint on the edge that exports Caddy's certificate),
+  `CERT_SOURCE_URL` (a protected endpoint on the edge that exports Caddy's certificate;
+  it carries the private key, so serve it over HTTPS or keep it reachable only from this host),
   installs them for nginx and coturn, and reloads both. `matrix-refresh-certs.timer` runs it
   nightly and after boot.
 * **Google (or other) sign-in** — add an upstream provider to `/opt/mas/config.yaml`

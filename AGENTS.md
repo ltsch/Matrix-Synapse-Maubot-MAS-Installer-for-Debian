@@ -29,7 +29,7 @@ Debian 12 by shell scripts.
 | User management (always via MAS) | [ADMIN_GUIDE → Users](docs/ADMIN_GUIDE.md#users) |
 | Google / upstream OAuth in MAS | [ADMIN_GUIDE → Upstream OAuth](docs/ADMIN_GUIDE.md#upstream-oauth-eg-google-sign-in) |
 | Upgrading components; breaking-change sources | [ADMIN_GUIDE → Upgrades](docs/ADMIN_GUIDE.md#upgrades) |
-| Rolling back a bad upgrade (`*.prev`, apt pin) | [ADMIN_GUIDE → Rollback](docs/ADMIN_GUIDE.md#rollback) |
+| Rolling back a bad upgrade (`*.prev`, `apt-mark hold`) | [ADMIN_GUIDE → Rollback](docs/ADMIN_GUIDE.md#rollback) |
 | PostgreSQL major-version upgrade | [ADMIN_GUIDE → PostgreSQL major upgrade](docs/ADMIN_GUIDE.md#postgresql-major-upgrade-manual) |
 | Backups | [ADMIN_GUIDE → Backups](docs/ADMIN_GUIDE.md#backups) |
 | Rebuild on a new host / restore from backup | [ADMIN_GUIDE → Rebuild / restore](docs/ADMIN_GUIDE.md#rebuild--restore-on-a-new-host) |
@@ -56,6 +56,9 @@ Debian 12 by shell scripts.
 | [backup_matrix.sh](backup_matrix.sh) | DB dumps + configs + media, 14-day retention (`matrix-backup.timer`, disabled by default). |
 | [mas-invite/invite_gen.py](mas-invite/invite_gen.py) | Flask invite-token page (deployed to `/opt/mas/invite_gen.py`). |
 | [maubot_requirements.txt](maubot_requirements.txt) | Maubot venv packages. |
+| [docs/](docs/) | INSTALL, ARCHITECTURE, ADMIN_GUIDE (see the documentation map above). |
+| [.gitignore](.gitignore) | Allow-list: every tracked top-level path must be listed with `!`. |
+| systemd units, logrotate | Not files in the repo: rendered by `install.sh` (`render_*` functions, `job_unit`/`timer_unit`); see them with `--render-only`. |
 
 ## Rules
 

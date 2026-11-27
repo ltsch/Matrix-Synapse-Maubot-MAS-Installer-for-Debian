@@ -113,14 +113,21 @@ The previous version of each component is kept next to it:
 
 | Component | Restore the previous version |
 | :--- | :--- |
-| MAS | `mv /opt/mas/mas.prev /opt/mas/mas && rm -rf /opt/mas/share && mv /opt/mas/share.prev /opt/mas/share && systemctl restart mas` — **only if no `database migrate` ran**; otherwise restore `mas_db` from the pre-upgrade backup too |
-| LiveKit / lk-jwt-service / coturn | `mv /usr/local/bin/<binary>.prev /usr/local/bin/<binary>` (`livekit-server`, `lk-jwt-service`, `turnserver`), restart the service |
+| MAS | `mv /opt/mas/mas.prev /opt/mas/mas && rm -rf /opt/mas/share && mv /opt/mas/share.prev /opt/mas/share && systemctl restart mas mas-invite`. The upgrade always runs `database migrate`, so if the new version changed the schema also restore `mas_db` from the pre-upgrade backup (`systemctl stop mas mas-invite` first; commands under *Rebuild / restore*) |
+| LiveKit / lk-jwt-service / coturn | `mv /usr/local/bin/<binary>.prev /usr/local/bin/<binary>` (`livekit-server`, `lk-jwt-service`, `turnserver`), restart the service. For lk-jwt-service also write the old tag to `/usr/local/lib/lk-jwt-service.version` |
+| Maubot venv | `sudo -H -u maubot /opt/maubot/venv/bin/pip install -r /opt/maubot/requirements.prev.txt && systemctl restart maubot` (snapshot taken before each upgrade) |
 | Element Web / Synapse-Admin | `rm -rf /var/www/<site> && mv /var/www/<site>.prev /var/www/<site>` |
-| Synapse (APT) | `apt-get install matrix-synapse-py3=<version>` then `apt-mark hold matrix-synapse-py3` (`apt-cache policy matrix-synapse-py3` lists versions); database migrations are not reversible, so a downgrade across a schema change needs the backup |
+| Synapse (APT) | `apt-get install matrix-synapse-py3=<version>` then `apt-mark hold matrix-synapse-py3` (`apt-cache policy matrix-synapse-py3` lists versions). Database migrations are not reversible, so a downgrade across a schema change needs the backup |
 | Anything with data | restore from the pre-upgrade backup (see *Rebuild / restore* below) |
 
-After a rollback, run `./upgrade_services.sh --check`. A held package or a rolled-back
-binary is upgraded again by the next run, so pin it until the upstream fix is out.
+After a rollback, run `./upgrade_services.sh --check`. Only one previous version is kept:
+the next upgrade of a component replaces its `.prev`.
+
+* A package held with `apt-mark hold` stays put on later runs (`apt-get upgrade` skips it);
+  release it with `apt-mark unhold matrix-synapse-py3` once the fix is out.
+* A rolled-back **binary or site is upgraded again by the next run** (the script always
+  installs the latest release). Until the upstream fix is out, don't run
+  `upgrade_services.sh`, or re-apply the rollback afterwards.
 
 Read release notes when jumping versions — this is where breakage comes from:
 * **Synapse** refuses to start with removed options
@@ -131,15 +138,22 @@ Read release notes when jumping versions — this is where breakage comes from:
 ### PostgreSQL major upgrade (manual)
 
 ```bash
-apt-get install postgresql-<new>          # from PGDG; do not let it create a cluster
+systemctl start matrix-backup.service     # fresh backup first; this is not reversible without it
+apt-get install postgresql-<new>          # from PGDG; it creates an empty "main" cluster on 5433
+pg_dropcluster --stop <new> main          # remove that empty cluster (pg_upgradecluster needs the name free)
+systemctl stop matrix-monitor.timer matrix-backup.timer
 systemctl stop matrix-synapse mas mas-invite maubot lk-jwt-service
-pg_upgradecluster <new> <old> main        # new cluster takes port 5432
+pg_upgradecluster -v <new> <old> main     # new cluster takes port 5432, old one moves to 5433
 systemctl start mas matrix-synapse mas-invite maubot lk-jwt-service
-# verify, then:
+systemctl start matrix-monitor.timer matrix-backup.timer
+./upgrade_services.sh --check
+# when everything works:
 pg_dropcluster <old> main && apt-get purge postgresql-<old> postgresql-client-<old>
 ```
 
-`synapse_db` must keep `C` collation (`pg_upgradecluster` preserves it).
+`synapse_db` must keep `C` collation (`pg_upgradecluster` preserves it). To stop new PGDG
+majors creating a cluster at all, set `create_main_cluster = false` in
+`/etc/postgresql-common/createcluster.conf`.
 
 ## Backups
 
@@ -161,7 +175,12 @@ How a run works, so a failure can never look like a good backup:
   `COMPLETE` marker. A failed run leaves nothing behind; the unit shows as failed.
 * Retention counts only completed backups: those older than `BACKUP_KEEP_DAYS` (14) are
   deleted, but the newest `BACKUP_KEEP_MIN` (3) are always kept.
-* A lock prevents a manual run and the timer run overlapping; a run is killed after 4 h.
+* A lock prevents a manual run and the timer run overlapping; a timer run is killed after
+  4 h. Old backups are pruned before and after each run, so a disk filled by old backups
+  clears itself.
+* Once `/mnt/backup` is real separate storage, set `BACKUP_REQUIRE_MOUNT=1` in `setup.config`:
+  the backup then refuses to run (and the unit fails) if the mount is missing, instead of
+  filling the root disk.
 * Once the timer is enabled, `monitor_services.sh` alerts if it stops or no completed backup
   is newer than 36 h.
 
@@ -171,10 +190,9 @@ How a run works, so a failure can never look like a good backup:
 storage — e.g. a Proxmox mount point (`pct set <vmid> -mp0 <storage>:<size>,mp=/mnt/backup`)
 — and copy backups off-host too (Proxmox Backup Server, rsync, restic).
 
-Restore, in order: `tar xzf files.tgz -C /`; `sudo -u postgres psql -f globals.sql` (roles);
-`sudo -u postgres pg_restore --clean --if-exists -d <db> <db>.dump` for each database
-(create it first on a fresh server; `synapse_db` with `C` collation); `tar xzf media.tgz -C /`;
-restart services (`mas` → `matrix-synapse` → the rest).
+To restore, follow *Rebuild / restore* below (on the same host, skip its first two steps).
+The backup files are readable by root only, so they are fed to the `postgres` tools on
+stdin.
 
 ## Rebuild / restore on a new host
 
@@ -182,22 +200,32 @@ The backup is enough to rebuild the server with the same identity. The Synapse s
 (`/etc/matrix-synapse/*.signing.key`, in `files.tgz`) and `server_name` define the server
 to the federation — never lose the key or change the name.
 
-1. Fresh Debian 12 with the same LAN IP (or update `LAN_IP` in the restored `setup.config`);
-   restore `setup.config` and `refresh_certs.conf` from `files.tgz` into the repo directory.
-2. `./install.sh` — builds the stack with new secrets and empty databases.
-3. Stop everything: `systemctl stop matrix-synapse mas mas-invite maubot lk-jwt-service livekit coturn`.
+Work as root inside the backup you are restoring: `cd /mnt/backup/matrix/<timestamp>`
+(copy that folder to the new host first). The repo lives in `/root` on this deployment;
+`files.tgz` stores `setup.config` and `refresh_certs.conf` under the repo path.
+
+1. Fresh Debian 12 with the same LAN IP (or edit `LAN_IP` after this step). Clone the repo to
+   the same path (`/root`), then put back its site files:
+   `tar xzf files.tgz -C / root/setup.config root/refresh_certs.conf`.
+2. `/root/install.sh` — builds the stack with new secrets and empty databases.
+3. Stop everything:
+   `systemctl stop matrix-monitor.timer matrix-backup.timer matrix-synapse mas mas-invite maubot lk-jwt-service livekit coturn`.
 4. `tar xzf files.tgz -C /` — puts back every config, secret, signing key and unit (this
    overwrites the new secrets, so everything matches the restored databases).
 5. Roles and databases, replacing the empty ones:
    ```bash
-   sudo -u postgres psql -f globals.sql        # "already exists" errors are fine
+   (cd /tmp && sudo -u postgres psql -f -) < globals.sql    # "already exists" errors are fine
    for db in synapse_db mas_db maubot_db; do
-       sudo -u postgres pg_restore --clean --if-exists -d "$db" "$db.dump"
+       (cd /tmp && sudo -u postgres pg_restore --clean --if-exists -d "$db") < "$db.dump"
    done
    ```
 6. `tar xzf media.tgz -C /` and `chown -R matrix-synapse:matrix-synapse /var/lib/matrix-synapse/media`.
-7. `systemctl daemon-reload`, start `mas`, then `matrix-synapse`, then the rest; run
-   `./upgrade_services.sh --check` and `./manage_users.py list`.
+7. `systemctl daemon-reload`, start `mas`, then `matrix-synapse`, then the rest, and
+   `systemctl enable --now matrix-backup.timer` if backups were enabled (the backup holds the
+   unit files but not their enabled state). coturn's copy of the certificate
+   (`/etc/turn_server_*.pem`) is not in the backup; `systemctl start matrix-refresh-certs.service`
+   recreates it.
+8. `/root/upgrade_services.sh --check` and `/root/manage_users.py list`.
 
 To restore on the *same* host, skip steps 1–2.
 
@@ -215,6 +243,9 @@ given. See [ARCHITECTURE → Secrets map](ARCHITECTURE.md#secrets-map).
 | Database password | `ALTER ROLE <role> PASSWORD '<new>'` (as postgres), then `homeserver.yaml` (synapse_user), MAS `database.uri` (mas) or Maubot `database` (maubot) | that service |
 | Registration secret | `conf.d/registration.yaml` | `matrix-synapse` |
 | SMTP password | at the mail provider, then `conf.d/email.yaml` and MAS `email.password` | `mas`, `matrix-synapse` |
+| Maubot admin password | `admins.admin` in `/opt/maubot/config.yaml` | `maubot` |
+| Maubot `unshared_secret` | `server.unshared_secret` in `/opt/maubot/config.yaml` | `maubot` |
+| Maubot pickle key | not routinely: `crypto_db_pickle_key` protects stored bot encryption keys; changing it loses the bots' E2EE sessions | — |
 | MAS encryption/signing keys | not routinely: rotating the encryption key makes stored upstream-OAuth tokens unreadable | — |
 
 Restarting LiveKit or coturn drops calls in progress; do it when nobody is in a call.

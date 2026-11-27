@@ -1,4 +1,5 @@
-# setup.config - site settings for install.sh, monitor_services.sh and update_turn_ip.sh.
+# setup.config - site settings read by install.sh, upgrade_services.sh, monitor_services.sh,
+# update_turn_ip.sh and backup_matrix.sh.
 # Copy to setup.config (git-ignored, keep it mode 600) and edit.
 
 # --- Names -------------------------------------------------------------------
@@ -41,6 +42,7 @@ BACKUP_DIR="/mnt/backup/matrix"
 
 # BACKUP_KEEP_DAYS=14         # delete completed backups older than this...
 # BACKUP_KEEP_MIN=3           # ...but always keep the newest N
+# BACKUP_REQUIRE_MOUNT=1      # refuse to back up unless /mnt/backup is a mount point
 
 # --- Monitoring (monitor_services.sh) ----------------------------------------
 # Discord-compatible webhook for alerts (leave empty to only log)
@@ -48,3 +50,7 @@ MONITOR_WEBHOOK_URL=""
 # MONITOR_REALERT_HOURS=6     # repeat an unchanged alert this often
 # MONITOR_CERT_WARN_DAYS=14    # alert when the TLS cert expires sooner
 # MONITOR_DISK_WARN_PCT=90     # alert when / or BACKUP_DIR is this full
+
+# --- Environment variables (not read from this file) ------------------------
+# GITHUB_TOKEN=...      raises the GitHub API rate limit for install/upgrade
+# ALLOW_UNVERIFIED=1    install a release asset even without a published SHA-256 digest

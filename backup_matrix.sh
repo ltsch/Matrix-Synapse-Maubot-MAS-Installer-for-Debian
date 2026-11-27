@@ -3,7 +3,8 @@
 # Nightly backup of the Matrix stack: database roles, PostgreSQL databases
 # (custom-format dumps), configs/secrets/signing keys, and the media store.
 #
-# Run nightly by matrix-backup.timer. Destination: BACKUP_DIR in setup.config
+# Run nightly by matrix-backup.timer once enabled (it is installed disabled) and by
+# upgrade_services.sh before upgrading. Destination: BACKUP_DIR in setup.config
 # (default /mnt/backup/matrix). Make /mnt/backup a mount point on separate storage
 # (e.g. a Proxmox mp0) - until then backups share the disk with the data.
 #
