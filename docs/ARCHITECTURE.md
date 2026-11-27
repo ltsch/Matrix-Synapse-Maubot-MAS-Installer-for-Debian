@@ -190,8 +190,9 @@ other servers → Caddy → nginx `/_matrix/federation`, `/_matrix/key` → Syna
 Synapse fetches remote signing keys directly (`trusted_key_servers: []`).
 
 **MatrixRTC call (Element Call / Element X — all calls in this deployment).**
-1. Client asks Synapse `GET /_matrix/client/v1/rtc/transports` → `m.livekit` at
-   `wss://chat.example.com/livekit/sfu`.
+1. Client asks Synapse `GET /_matrix/client/v1/rtc/transports` (Element Web uses the unstable
+   `org.matrix.msc4143` path) → `livekit`/`m.livekit` with `url: wss://chat.example.com/livekit/sfu`,
+   plus a legacy `livekit` entry with `livekit_service_url: https://chat.example.com/livekit/jwt`.
 2. Client `POST /_matrix/client/v1/rtc/livekit/get_token`. Synapse proxies it (MSC4512) to
    lk-jwt-service, which is registered as an **application service**.
 3. lk-jwt-service checks the user is joined to the room (MSC4502 query to Synapse), creates
@@ -236,6 +237,7 @@ All of these files are mode 600/640 and owned by the service that reads them.
 
 | Symptom | Likely cause | Check |
 | :--- | :--- | :--- |
+| Call fails: *server is not configured to work with Element Call* (`MISSING_MATRIX_RTC_TRANSPORT`) | No transport the client understands — Element Web's Element Call needs `type: livekit` (not only `m.livekit`) | `curl -H 'Authorization: Bearer …' https://chat.example.com/_matrix/client/unstable/org.matrix.msc4143/rtc/transports`; see `matrix_rtc.transports` in `homeserver.yaml` |
 | *Register* jumps straight to Google, no username/password option | `account.password_registration_enabled` is off (MAS skips the choice when only one method exists) | ADMIN_GUIDE → Users → registration table |
 | Someone registered without an invite | Upstream provider lacks `registration_token_required: true` | `./manage_users.py list`; set it, `mas config sync --prune`, restart `mas` |
 | A call never connects; lk-jwt-service logs `OpenIDUserInfo ... status=404` | nginx blocks `/_matrix/federation/v1/openid/userinfo` (private server) | that one location must proxy to Synapse — [PRIVATE_SERVER.md](PRIVATE_SERVER.md#federation-off) |

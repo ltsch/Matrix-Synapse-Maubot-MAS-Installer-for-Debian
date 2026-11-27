@@ -230,9 +230,18 @@ turn_allow_guests: true
 app_service_config_files:
   - /etc/matrix-synapse/appservices/lk-jwt-service.yaml
 matrix_rtc:
+  # Advertised MatrixRTC transports, in order of preference (clients use the first they understand):
+  #  - type "livekit" + url: tokens via Synapse (/_matrix/client/v1/rtc/livekit/*, MSC4512) - what
+  #    Element Call (Element Web 1.12.x) requires; it ignores "m.livekit" (MISSING_MATRIX_RTC_TRANSPORT)
+  #  - type "m.livekit" + url: the newer stable name, for clients that already use it
+  #  - type "livekit" + livekit_service_url: legacy OpenID path via lk-jwt-service, for older clients
   transports:
+    - type: livekit
+      url: wss://${MATRIX_FQDN}/livekit/sfu
     - type: m.livekit
       url: wss://${MATRIX_FQDN}/livekit/sfu
+    - type: livekit
+      livekit_service_url: https://${MATRIX_FQDN}/livekit/jwt
 # MSC4140 delayed events (call membership heartbeats / leave on disconnect)
 max_event_delay_duration: 24h
 rc_message:

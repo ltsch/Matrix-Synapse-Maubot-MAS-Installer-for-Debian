@@ -450,7 +450,11 @@ short blip produces an alert and then a RESOLVED message.
 ### Client assumptions (latest apps only)
 * Element Web sends **all** calls through Element Call (`element_call.use_exclusively`);
   embedded Element Call is pinned to `matrix_rtc_mode: matrix_2_0` (sticky events).
-* Synapse advertises only the stable `m.livekit` MatrixRTC transport.
+* Synapse advertises three MatrixRTC transports (`matrix_rtc.transports`), in this order:
+  `livekit` + `url` (tokens through Synapse — **required by Element Call in Element Web 1.12.x**,
+  which ignores `m.livekit` and fails with `MISSING_MATRIX_RTC_TRANSPORT`), `m.livekit` + `url`
+  (the newer name), and `livekit` + `livekit_service_url` (legacy OpenID path via
+  lk-jwt-service). Clients use the first one they understand.
 * `.well-known/matrix/client` carries only `m.homeserver`; clients find MAS via
   `/_matrix/client/v1/auth_metadata`.
 * QR-code sign-in: both rendezvous versions are on — `msc4108_enabled` (2024 version, used by
