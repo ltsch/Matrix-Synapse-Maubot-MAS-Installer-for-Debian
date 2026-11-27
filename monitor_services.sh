@@ -35,11 +35,12 @@ SERVICES=(matrix-synapse mas mas-invite coturn livekit lk-jwt-service maubot ngi
           matrix-turn-ip.timer matrix-refresh-certs.timer)
 
 # Endpoints through the public names (edge proxy -> nginx -> backend).
+: "${FEDERATION_ENABLED:=true}"
 URLS=("https://$MATRIX_FQDN/_matrix/client/versions"
-      "https://$MATRIX_FQDN/_matrix/federation/v1/version"
       "https://$AUTH_FQDN/.well-known/openid-configuration"
       "https://$MATRIX_FQDN/livekit/jwt/healthz"
       "https://$MATRIX_FQDN/_matrix/maubot")
+[ "$FEDERATION_ENABLED" = true ] && URLS+=("https://$MATRIX_FQDN/_matrix/federation/v1/version")
 
 log() { echo "$(date -Is) $*"; }
 

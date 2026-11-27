@@ -1,6 +1,6 @@
 # Installation
 
-> Docs: [README](../README.md) · [INSTALL](INSTALL.md) · [ARCHITECTURE](ARCHITECTURE.md) · [ADMIN_GUIDE](ADMIN_GUIDE.md) · [AGENTS](../AGENTS.md)
+> Docs: [README](../README.md) · [INSTALL](INSTALL.md) · [ARCHITECTURE](ARCHITECTURE.md) · [ADMIN_GUIDE](ADMIN_GUIDE.md) · [PRIVATE_SERVER](PRIVATE_SERVER.md) · [AGENTS](../AGENTS.md)
 
 `install.sh` builds the whole stack on a **fresh Debian 12 (bookworm)** LXC or VM. It refuses
 to run over a completed installation — use `upgrade_services.sh` for updates. If an install
@@ -48,9 +48,10 @@ Forward these from the public IP to the Matrix host:
 Port 443 is handled by the edge proxy itself; the others are plain NAT port forwards.
 An optional host firewall matching this table is in [examples/](../examples/) (see
 ADMIN_GUIDE → *Host hardening*).
-**Federation also runs over 443**: nginx serves `/.well-known/matrix/server` pointing other
-servers at `chat.example.com:443`, so port 8448 is not needed (check with
-https://federationtester.matrix.org/).
+**Federation also runs over 443** (when enabled): nginx serves `/.well-known/matrix/server`
+pointing other servers at `chat.example.com:443`, so port 8448 is not needed (check with
+https://federationtester.matrix.org/). With `FEDERATION_ENABLED="false"` there is no
+federation at all — see [PRIVATE_SERVER.md](PRIVATE_SERVER.md).
 NAT reflection (hairpin) for these forwards lets LAN clients use the public address too.
 
 ## 3. Edge proxy (Caddy example)
@@ -189,5 +190,6 @@ grep '^external-ip' /etc/turnserver.conf                                 # exter
 **QR sign-in.** On Element Web open *Settings → Sessions → Link new device* and scan the code
 with Element X on a phone (mobile data); the phone should end up signed in and verified.
 
-Then open `https://chat.example.com`, sign in as the admin, and check federation at
-https://federationtester.matrix.org/.
+Then open `https://chat.example.com` and sign in as the admin. With federation enabled, check
+it at https://federationtester.matrix.org/; on a private server, run the checks in
+[PRIVATE_SERVER.md → Verify](PRIVATE_SERVER.md#verify) instead.

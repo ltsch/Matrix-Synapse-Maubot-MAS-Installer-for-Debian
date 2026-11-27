@@ -1,6 +1,6 @@
 # Administration Guide
 
-> Docs: [README](../README.md) · [INSTALL](INSTALL.md) · [ARCHITECTURE](ARCHITECTURE.md) · [ADMIN_GUIDE](ADMIN_GUIDE.md) · [AGENTS](../AGENTS.md)
+> Docs: [README](../README.md) · [INSTALL](INSTALL.md) · [ARCHITECTURE](ARCHITECTURE.md) · [ADMIN_GUIDE](ADMIN_GUIDE.md) · [PRIVATE_SERVER](PRIVATE_SERVER.md) · [AGENTS](../AGENTS.md)
 
 Day-to-day operation of the stack. Architecture, ports and troubleshooting tables are in
 [ARCHITECTURE.md](ARCHITECTURE.md). Commands assume you are root in the repo directory.
@@ -282,7 +282,7 @@ stdin.
 
 The backup is enough to rebuild the server with the same identity. The Synapse signing key
 (`/etc/matrix-synapse/*.signing.key`, in `files.tgz`) and `server_name` define the server
-to the federation — never lose the key or change the name.
+to the federation (and is still needed on a private server) — never lose the key or change the name.
 
 Work as root inside the backup you are restoring: `cd /mnt/backup/matrix/<timestamp>`
 (copy that folder to the new host first). The repo lives in `/root` on this deployment;
@@ -376,7 +376,7 @@ systemctl start matrix-turn-ip.service         # run now
 * a completed backup newer than 36 h (once `matrix-backup.timer` is enabled);
 * the TLS certificate does not expire within `MONITOR_CERT_WARN_DAYS` (14);
 * `/` and `BACKUP_DIR` are below `MONITOR_DISK_WARN_PCT` (90 %) full;
-* the client API, federation, MAS and lk-jwt-service endpoints and the Maubot UI answer through
+* the client API, MAS and lk-jwt-service endpoints, the Maubot UI and (if `FEDERATION_ENABLED`) federation answer through
   the public names without a 5xx.
 
 Alerts go to `MONITOR_WEBHOOK_URL` (Discord-compatible) only when a problem appears or the set of
@@ -450,6 +450,9 @@ and can break rooms; `msc2654` (Synapse warns counts are wrong); `msc4263` (brea
 verifying users you share no room with); `msc3890` (depends on a feature Element removed).
 
 ### Privacy
+This deployment is a **private server** — federation off, every room encrypted, push without
+content, profiles behind sign-in, Element Web locked to this server. Each setting, with pros,
+cons and how to undo it: [PRIVATE_SERVER.md](PRIVATE_SERVER.md).
 * Public room directory is not browsable without login or over federation.
 * URL previews are on, but never fetch private/reserved addresses.
 

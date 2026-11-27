@@ -20,6 +20,10 @@ EDGE_PROXY_IP="192.168.1.1"
 TURN_DDNS_HOST="home.example.com"
 # PUBLIC_IP="203.0.113.10"   # optional override if TURN_DDNS_HOST cannot be resolved
 
+# --- Federation ---------------------------------------------------------------
+# false = private server: no contact with any other Matrix server (docs/PRIVATE_SERVER.md).
+FEDERATION_ENABLED="true"
+
 # --- Initial admin (created in MAS) -----------------------------------------
 ADMIN_USER="admin"
 # ADMIN_PASS=""              # generated and saved to /root/matrix_credentials.txt if empty

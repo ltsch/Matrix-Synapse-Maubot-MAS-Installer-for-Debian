@@ -1,6 +1,6 @@
 # Architecture
 
-> Docs: [README](../README.md) · [INSTALL](INSTALL.md) · [ARCHITECTURE](ARCHITECTURE.md) · [ADMIN_GUIDE](ADMIN_GUIDE.md) · [AGENTS](../AGENTS.md)
+> Docs: [README](../README.md) · [INSTALL](INSTALL.md) · [ARCHITECTURE](ARCHITECTURE.md) · [ADMIN_GUIDE](ADMIN_GUIDE.md) · [PRIVATE_SERVER](PRIVATE_SERVER.md) · [AGENTS](../AGENTS.md)
 
 How the stack fits together, which ports and files matter, and how requests flow —
 written for troubleshooting. Names use the examples from `setup.config.example`:
@@ -154,7 +154,8 @@ state, so a job that stops running *or* fails raises an alert (details in
 **Discovery.** A client resolves `https://chat.example.com/.well-known/matrix/client`
 (served by nginx, contains only `m.homeserver`), then reads
 `/_matrix/client/v1/auth_metadata` (Synapse) to find MAS at `auth.chat.example.com`.
-Federation peers read `/.well-known/matrix/server` → `chat.example.com:443`.
+Federation peers read `/.well-known/matrix/server` → `chat.example.com:443` (only when
+federation is enabled; this deployment is a [private server](PRIVATE_SERVER.md) and returns 404).
 
 **Login (OAuth / Element X, current Element Web).** Client → MAS (`auth.`) authorization
 flow → MAS issues an access token. On every API call Synapse **introspects** the token
@@ -182,7 +183,10 @@ MAS calls Synapse's `/_synapse/mas/*` endpoints (localhost) to mirror it. If tha
 MAS logs `Job failed, will retry` and Synapse logs errors on `MasProvisionUserResource`;
 `manage_users.py list` shows the user as `IN-SYNAPSE no!`.
 
-**Federation.** Other servers → Caddy → nginx `/_matrix/federation`, `/_matrix/key` → Synapse.
+**Federation** (off on this deployment: `federation_domain_whitelist: []`, nginx returns 404 for
+`/_matrix/federation/*` and `/_matrix/key/*` except `/_matrix/federation/v1/openid/userinfo`,
+which lk-jwt-service needs — see [PRIVATE_SERVER.md](PRIVATE_SERVER.md)). When enabled:
+other servers → Caddy → nginx `/_matrix/federation`, `/_matrix/key` → Synapse.
 Synapse fetches remote signing keys directly (`trusted_key_servers: []`).
 
 **MatrixRTC call (Element Call / Element X — all calls in this deployment).**
@@ -232,6 +236,8 @@ All of these files are mode 600/640 and owned by the service that reads them.
 
 | Symptom | Likely cause | Check |
 | :--- | :--- | :--- |
+| A call never connects; lk-jwt-service logs `OpenIDUserInfo ... status=404` | nginx blocks `/_matrix/federation/v1/openid/userinfo` (private server) | that one location must proxy to Synapse — [PRIVATE_SERVER.md](PRIVATE_SERVER.md#federation-off) |
+| Can't join or DM someone on another server | Federation is off by design | [PRIVATE_SERVER.md](PRIVATE_SERVER.md#federation-off) |
 | No *Sign in with QR code* / *Link new device* option | App too old, or the rendezvous is off | `curl -s https://chat.example.com/_matrix/client/versions` must show `org.matrix.msc4108: true`; update the app |
 | QR scan fails or times out | Session expired (2 min) or edge proxy blocks the rendezvous path | retry promptly; `POST /_matrix/client/unstable/org.matrix.msc4108/rendezvous` from outside should return 201 |
 | No push notifications on a phone | Pusher missing/failing, or outbound HTTPS to the push gateway blocked | `select app_id, last_success, failing_since from pushers` in `synapse_db`; `curl https://matrix.org/_matrix/push/v1/notify` from the host |

@@ -27,6 +27,8 @@ Debian 12 by shell scripts.
 | Symptom → cause → fix | [ARCHITECTURE → Troubleshooting](docs/ARCHITECTURE.md#troubleshooting-by-symptom) |
 | Service names and log locations | [ADMIN_GUIDE → Services](docs/ADMIN_GUIDE.md#services) |
 | User management (always via MAS) | [ADMIN_GUIDE → Users](docs/ADMIN_GUIDE.md#users) |
+| Private server: federation off, encryption by default, push/profile privacy, Element lock-down (pros/cons, undo) | [docs/PRIVATE_SERVER.md](docs/PRIVATE_SERVER.md) |
+| Federation switch (`FEDERATION_ENABLED`) and what it renders | [PRIVATE_SERVER → Federation off](docs/PRIVATE_SERVER.md#federation-off) |
 | Supported apps, signing in, QR sign-in, push | [ADMIN_GUIDE → Clients](docs/ADMIN_GUIDE.md#clients-desktop-and-mobile) |
 | Bots: installed Maubot plugins, adding one, reconnecting the bot | [ADMIN_GUIDE → Bots](docs/ADMIN_GUIDE.md#bots-maubot) |
 | Google / upstream OAuth in MAS | [ADMIN_GUIDE → Upstream OAuth](docs/ADMIN_GUIDE.md#upstream-oauth-eg-google-sign-in) |
@@ -59,7 +61,7 @@ Debian 12 by shell scripts.
 | [backup_matrix.sh](backup_matrix.sh) | DB dumps + configs + media, 14-day retention (`matrix-backup.timer`, disabled by default). |
 | [mas-invite/invite_gen.py](mas-invite/invite_gen.py) | Flask invite-token page (deployed to `/opt/mas/invite_gen.py`). |
 | [maubot_requirements.txt](maubot_requirements.txt) | Maubot venv packages. |
-| [docs/](docs/) | INSTALL, ARCHITECTURE, ADMIN_GUIDE (see the documentation map above). |
+| [docs/](docs/) | INSTALL, ARCHITECTURE, ADMIN_GUIDE, PRIVATE_SERVER (see the documentation map above). |
 | [examples/](examples/) | Optional host firewall configs (nftables, ufw); not applied by `install.sh`. Keep the ports in sync with ARCHITECTURE → Ports. |
 | [.gitignore](.gitignore) | Allow-list: every tracked top-level path must be listed with `!`. |
 | systemd units, logrotate | Not files in the repo: rendered by `install.sh` (`render_*` functions, `job_unit`/`timer_unit`); see them with `--render-only`. |

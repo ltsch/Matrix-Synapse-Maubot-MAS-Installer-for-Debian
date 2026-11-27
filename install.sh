@@ -76,6 +76,31 @@ source "$HERE/setup.config"
 : "${ELEMENT_COUNTRY_CODE:=US}"
 : "${SMTP_HOST:=}" "${SMTP_PORT:=587}" "${SMTP_USER:=}" "${SMTP_PASS:=}" "${SMTP_FROM:=}" "${SMTP_REPLY_TO:=${SMTP_FROM}}"
 : "${MAPTILER_KEY:=}"
+: "${FEDERATION_ENABLED:=true}"   # false = private server (docs/PRIVATE_SERVER.md)
+case "$FEDERATION_ENABLED" in true|false) ;; *) die "FEDERATION_ENABLED must be true or false" ;; esac
+
+# Federation on/off changes a few rendered blocks (see docs/PRIVATE_SERVER.md).
+if [ "$FEDERATION_ENABLED" = true ]; then
+    ELEMENT_DEFAULT_FEDERATE=true
+    NGINX_FEDERATION="    location = /.well-known/matrix/server {
+        default_type application/json;
+        add_header Access-Control-Allow-Origin *;
+        return 200 '{\"m.server\": \"${MATRIX_FQDN}:443\"}';
+    }"
+else
+    ELEMENT_DEFAULT_FEDERATE=false
+    NGINX_FEDERATION="    # Federation disabled (FEDERATION_ENABLED=false): no server discovery, no federation
+    # or key API from outside. Synapse also refuses all servers (conf.d/federation.yaml).
+    location = /.well-known/matrix/server { return 404; }
+    location ^~ /_matrix/federation/ { return 404; }
+    location ^~ /_matrix/key/ { return 404; }
+    # Exception: OpenID user-info lookup. lk-jwt-service validates MatrixRTC OpenID tokens
+    # here (legacy /livekit/jwt/sfu/get path); it only answers for a valid token.
+    location = /_matrix/federation/v1/openid/userinfo {
+        include snippets/matrix-proxy.conf;
+        proxy_pass http://127.0.0.1:8008;
+    }"
+fi
 
 # Public IP for coturn/LiveKit NAT mapping (kept current later by update_turn_ip.sh)
 if [ -z "${PUBLIC_IP:-}" ]; then
@@ -108,12 +133,14 @@ fi
 export MATRIX_FQDN AUTH_FQDN LAN_IP EDGE_PROXY_IP PUBLIC_IP ELEMENT_COUNTRY_CODE \
        SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASS SMTP_FROM SMTP_REPLY_TO \
        SYNAPSE_DB_PASS MAUBOT_DB_PASS MAUBOT_PICKLE_KEY MAUBOT_ADMIN_PASS MAUBOT_UNSHARED_SECRET \
-       MAS_MATRIX_SECRET TURN_SECRET REG_SECRET AS_TOKEN HS_TOKEN LIVEKIT_KEY LIVEKIT_SECRET
+       MAS_MATRIX_SECRET TURN_SECRET REG_SECRET AS_TOKEN HS_TOKEN LIVEKIT_KEY LIVEKIT_SECRET \
+       ELEMENT_DEFAULT_FEDERATE NGINX_FEDERATION
 # Only these variables are substituted in templates (nginx's own $vars are left alone).
 SUBST_VARS='$MATRIX_FQDN $AUTH_FQDN $LAN_IP $EDGE_PROXY_IP $PUBLIC_IP $ELEMENT_COUNTRY_CODE
 $SMTP_HOST $SMTP_PORT $SMTP_USER $SMTP_PASS $SMTP_FROM $SMTP_REPLY_TO
 $SYNAPSE_DB_PASS $MAUBOT_DB_PASS $MAUBOT_PICKLE_KEY $MAUBOT_ADMIN_PASS $MAUBOT_UNSHARED_SECRET
-$MAS_MATRIX_SECRET $TURN_SECRET $REG_SECRET $AS_TOKEN $HS_TOKEN $LIVEKIT_KEY $LIVEKIT_SECRET'
+$MAS_MATRIX_SECRET $TURN_SECRET $REG_SECRET $AS_TOKEN $HS_TOKEN $LIVEKIT_KEY $LIVEKIT_SECRET
+$ELEMENT_DEFAULT_FEDERATE $NGINX_FEDERATION'
 
 # put <path> <mode> <owner:group>  (template on stdin, ${VAR}s substituted)
 put() {
@@ -173,6 +200,12 @@ report_stats: false
 # Privacy: no unauthenticated / federated browsing of the public room directory.
 allow_public_rooms_without_auth: false
 allow_public_rooms_over_federation: false
+# Privacy (docs/PRIVATE_SERVER.md): profiles only for signed-in users; every new room
+# end-to-end encrypted; push notifications carry no message content.
+require_auth_for_profile_requests: true
+encryption_enabled_by_default_for_room_type: all
+push:
+  include_content: false
 
 # --- Authentication is delegated to MAS (stable integration, Synapse >= 1.157) ---
 matrix_authentication_service:
@@ -276,6 +309,16 @@ EOF
     put /etc/matrix-synapse/conf.d/registration.yaml 640 root:matrix-synapse <<'EOF'
 registration_shared_secret: ${REG_SECRET}
 EOF
+    if [ "$FEDERATION_ENABLED" = false ]; then
+        put /etc/matrix-synapse/conf.d/federation.yaml 644 root:matrix-synapse <<'EOF'
+# Private server (FEDERATION_ENABLED=false in setup.config): an empty allow-list means
+# Synapse neither sends to nor accepts from any other Matrix server. Managed by install.sh;
+# delete this file and set FEDERATION_ENABLED=true to federate (docs/PRIVATE_SERVER.md).
+federation_domain_whitelist: []
+EOF
+    elif [ -z "$RENDER_DIR" ]; then
+        rm -f /etc/matrix-synapse/conf.d/federation.yaml
+    fi
     put /etc/matrix-synapse/appservices/lk-jwt-service.yaml 640 matrix-synapse:lk-jwt <<'EOF'
 # MatrixRTC Authorization Service (lk-jwt-service) as an application service.
 # Synapse proxies /_matrix/{client,federation}/*/rtc/livekit/* to it (MSC4512) and it checks
@@ -614,10 +657,10 @@ render_web() {
             "server_name": "\${MATRIX_FQDN}"
         }
     },
-    "disable_custom_urls": false,
-    "disable_guests": false,
+    "disable_custom_urls": true,
+    "disable_guests": true,
     "disable_login_language_selector": false,
-    "disable_3pid_login": false,
+    "disable_3pid_login": true,
     "force_verification": false,
     "brand": "Element",
     "default_widget_container_height": 280,
@@ -629,21 +672,15 @@ render_web() {
         "feature_group_calls": true,
         "feature_disable_call_per_sender_encryption": "labs"
     },
-    "default_federate": true,
+    "default_federate": \${ELEMENT_DEFAULT_FEDERATE},
     "default_theme": "light",
     "room_directory": {
         "servers": [
-            "matrix.org"
+            "\${MATRIX_FQDN}"
         ]
-    },
-    "enable_presence_by_hs_url": {
-        "https://matrix.org": false
     },
     "setting_defaults": {
         "breadcrumbs": true
-    },
-    "jitsi": {
-        "preferred_domain": "meet.element.io"
     },
     "element_call": {
         "brand": "Element Call",
@@ -712,11 +749,7 @@ server {
         add_header Access-Control-Allow-Origin *;
         return 200 '{"m.homeserver": {"base_url": "https://${MATRIX_FQDN}"}}';
     }
-    location = /.well-known/matrix/server {
-        default_type application/json;
-        add_header Access-Control-Allow-Origin *;
-        return 200 '{"m.server": "${MATRIX_FQDN}:443"}';
-    }
+${NGINX_FEDERATION}
 
     # --- MAS compatibility layer -----------------------------------------
     # Legacy (non-OAuth) clients log in/out/refresh against MAS, not Synapse.

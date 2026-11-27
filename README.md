@@ -34,6 +34,7 @@ Prerequisites (DNS, port forwards, edge proxy config) are in **[docs/INSTALL.md]
 * [docs/INSTALL.md](docs/INSTALL.md) — prerequisites, firewall ports, Caddy example, install, verify
 * [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — component diagram, systemd units and timers, ports, request flows, secrets, troubleshooting
 * [docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md) — users, upgrades and rollback, backups, rebuild/restore, secret rotation, certificates, public IP, monitoring, configuration reference, known limitations
+* [docs/PRIVATE_SERVER.md](docs/PRIVATE_SERVER.md) — private-server settings (federation off, encryption by default, push without content…) with pros, cons and how to undo each
 * [AGENTS.md](AGENTS.md) — documentation/code map and rules for contributors and AI agents
 
 ## Repository layout
@@ -51,7 +52,7 @@ Prerequisites (DNS, port forwards, edge proxy config) are in **[docs/INSTALL.md]
 | `mas-invite/invite_gen.py` | Invite-token page served at `/register` | systemd |
 | `maubot_requirements.txt` | Maubot venv packages | — |
 | `setup.config.example`, `refresh_certs.conf.example` | Site settings templates (real files are git-ignored) | — |
-| `docs/` | INSTALL, ARCHITECTURE, ADMIN_GUIDE | — |
+| `docs/` | INSTALL, ARCHITECTURE, ADMIN_GUIDE, PRIVATE_SERVER | — |
 | `examples/` | Optional host firewall (nftables, ufw) — not applied by the installer | — |
 | `AGENTS.md` | Documentation/code map and rules for contributors and agents | — |
 

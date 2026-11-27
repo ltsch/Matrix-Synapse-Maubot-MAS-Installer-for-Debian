@@ -32,6 +32,7 @@ source "$HERE/lib/common.sh"
 [ -f "$HERE/setup.config" ] && source "$HERE/setup.config"
 : "${MATRIX_FQDN:=}"
 : "${AUTH_FQDN:=${MATRIX_FQDN:+auth.$MATRIX_FQDN}}"
+: "${FEDERATION_ENABLED:=true}"
 
 CHECK_ONLY=false
 BACKUP=true
@@ -84,8 +85,9 @@ health_check() {
     done
     # Through nginx with the real Host names (what the edge proxy sends)
     if [ -n "$MATRIX_FQDN" ]; then
-        for u in "$MATRIX_FQDN/_matrix/client/versions" "$MATRIX_FQDN/.well-known/matrix/server" \
-                 "$AUTH_FQDN/.well-known/openid-configuration"; do
+        local vhosts=("$MATRIX_FQDN/_matrix/client/versions" "$AUTH_FQDN/.well-known/openid-configuration")
+        [ "$FEDERATION_ENABLED" = true ] && vhosts+=("$MATRIX_FQDN/.well-known/matrix/server")
+        for u in "${vhosts[@]}"; do
             code=$(curl -sk -o /dev/null -w '%{http_code}' -m 10 --resolve "${u%%/*}:443:127.0.0.1" "https://$u")
             if [ "$code" = 200 ]; then ok "nginx vhost https://$u"; else bad "nginx vhost https://$u (HTTP $code)"; fi
         done
