@@ -308,6 +308,35 @@ is logged and retried on the next run. Every failing run is logged with a timest
 The monitor timer is paused while `upgrade_services.sh` runs. Job logs in `/var/log/` are
 rotated weekly (8 kept, compressed) by `/etc/logrotate.d/matrix-jobs`.
 
+## Host hardening
+
+Recommended for every deployment. Items marked *installer* are set up by `install.sh`.
+
+* **Restart on failure** (*installer*) — nginx and the PostgreSQL clusters ship with
+  `Restart=no`; drop-ins (`/etc/systemd/system/nginx.service.d/restart.conf`,
+  `postgresql@.service.d/restart.conf`) restart them 5 s after a crash. All other services
+  already restart (`always` or `on-failure`). Synapse is ordered after PostgreSQL
+  (`matrix-synapse.service.d/matrix.conf`) instead of crash-looping at boot.
+* **Logs not world-readable** (*installer*) — Synapse runs with `UMask=0027`, so
+  `homeserver.log` (client IPs, user IDs) is `640`; the job logs are `640 root:adm`
+  (`/etc/logrotate.d/matrix-jobs` keeps that on rotation); nginx logs are `640` already.
+* **Journal size cap** (*installer*) — `/etc/systemd/journald.conf.d/matrix.conf` sets
+  `SystemMaxUse=500M` (the default is 10 % of the filesystem).
+* **SSH keys only** (manual, done on the reference host) — once your key works:
+  ```bash
+  printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\n' > /etc/ssh/sshd_config.d/50-matrix-hardening.conf
+  sshd -t && systemctl reload ssh
+  ```
+  Not done by the installer, so it cannot lock you out of a fresh host.
+* **Host firewall** (optional, not applied) — the edge firewall is the primary filter. For
+  defence in depth, [examples/nftables.conf](../examples/nftables.conf) (native on Debian 12)
+  and [examples/ufw.sh](../examples/ufw.sh) allow only SSH and HTTPS from the LAN/edge plus the
+  TURN and LiveKit media ports, and keep LiveKit's 7880 closed. Syntax-check with
+  `nft -c -f examples/nftables.conf`; apply with a console open.
+
+Monitoring deliberately alerts on the **first** failed check (no "two strikes" delay): a
+short blip produces an alert and then a RESOLVED message.
+
 ## Configuration reference
 
 ### Client assumptions (latest apps only)

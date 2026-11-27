@@ -90,18 +90,19 @@ Every long-running component and every scheduled job is a systemd unit; there is
 
 | Unit | Source | Runs as | Ordered after | Restart | Key settings |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `postgresql` (`postgresql@<ver>-main`) | PGDG package | `postgres` | — | no | cluster in `/etc/postgresql/<ver>/main/` |
-| `matrix-synapse` | matrix.org package | `matrix-synapse` | network | always | reads `homeserver.yaml` + `conf.d/` |
+| `postgresql` (`postgresql@<ver>-main`) | PGDG package + drop-in `postgresql@.service.d/restart.conf` | `postgres` | — | on-failure (5 s) | cluster in `/etc/postgresql/<ver>/main/` |
+| `matrix-synapse` | matrix.org package + drop-in `matrix-synapse.service.d/matrix.conf` | `matrix-synapse` | postgresql (`Wants=`) | always | reads `homeserver.yaml` + `conf.d/`; `UMask=0027` (logs not world-readable) |
 | `mas` | `install.sh` | `mas` | postgresql | always | `MAS_CONFIG=/opt/mas/config.yaml`, cwd `/opt/mas` |
 | `mas-invite` | `install.sh` | `mas` | mas | always | `MAS_PUBLIC_BASE=https://auth.<domain>` |
 | `livekit` | `install.sh` | `livekit` | network-online | on-failure | `--config /etc/livekit/livekit.yaml` |
 | `lk-jwt-service` | `install.sh` | `lk-jwt` | livekit, matrix-synapse | on-failure | all settings as `Environment=` (`LIVEKIT_URL`, `LIVEKIT_KEY_FILE`, `LIVEKIT_JWT_BIND=127.0.0.1:8083`, `LIVEKIT_AS_REGISTRATION_FILE`, ...) |
 | `coturn` | Debian unit + `install.sh` drop-in `coturn.service.d/override.conf` | `turnserver` | network | on-failure | drop-in swaps `ExecStart` to the source-built `/usr/local/bin/turnserver` |
 | `maubot` | `install.sh` | `maubot` | postgresql, matrix-synapse | always | `/opt/maubot/venv/bin/python -m maubot`, cwd `/opt/maubot` |
-| `nginx` | nginx.org package | `root` → `www-data` workers | network | no | `nginx -t` before every reload |
+| `nginx` | nginx.org package + drop-in `nginx.service.d/restart.conf` | `root` → `www-data` workers | network | on-failure (5 s) | `nginx -t` before every reload |
 
 `After=` only orders startup; nothing hard-`Requires` another unit, so a dependency
-restarting does not take its dependents down. Restart `mas` before `matrix-synapse` when
+restarting does not take its dependents down. The drop-ins above are written by
+`install.sh` (`render_system`) and survive package upgrades. Restart `mas` before `matrix-synapse` when
 both changed (Synapse checks MAS at startup).
 
 ### Scheduled jobs (timers)

@@ -38,6 +38,7 @@ Debian 12 by shell scripts.
 | Public-IP tracking for coturn/LiveKit | [ADMIN_GUIDE → Public IP changes](docs/ADMIN_GUIDE.md#public-ip-changes) |
 | Monitoring / alert webhook | [ADMIN_GUIDE → Monitoring](docs/ADMIN_GUIDE.md#monitoring) |
 | Client assumptions, enabled MSCs, privacy settings | [ADMIN_GUIDE → Configuration reference](docs/ADMIN_GUIDE.md#configuration-reference) |
+| Host hardening: restart policies, log permissions, journal cap, SSH, firewall | [ADMIN_GUIDE → Host hardening](docs/ADMIN_GUIDE.md#host-hardening) |
 | Accepted limitations and deferred work | [ADMIN_GUIDE → Known limitations](docs/ADMIN_GUIDE.md#known-limitations-and-deferred-work) |
 | Site settings (all variables, with comments) | [setup.config.example](setup.config.example) |
 | Cert-refresh settings | [refresh_certs.conf.example](refresh_certs.conf.example) |
@@ -57,6 +58,7 @@ Debian 12 by shell scripts.
 | [mas-invite/invite_gen.py](mas-invite/invite_gen.py) | Flask invite-token page (deployed to `/opt/mas/invite_gen.py`). |
 | [maubot_requirements.txt](maubot_requirements.txt) | Maubot venv packages. |
 | [docs/](docs/) | INSTALL, ARCHITECTURE, ADMIN_GUIDE (see the documentation map above). |
+| [examples/](examples/) | Optional host firewall configs (nftables, ufw); not applied by `install.sh`. Keep the ports in sync with ARCHITECTURE → Ports. |
 | [.gitignore](.gitignore) | Allow-list: every tracked top-level path must be listed with `!`. |
 | systemd units, logrotate | Not files in the repo: rendered by `install.sh` (`render_*` functions, `job_unit`/`timer_unit`); see them with `--render-only`. |
 

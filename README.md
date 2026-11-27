@@ -52,6 +52,7 @@ Prerequisites (DNS, port forwards, edge proxy config) are in **[docs/INSTALL.md]
 | `maubot_requirements.txt` | Maubot venv packages | — |
 | `setup.config.example`, `refresh_certs.conf.example` | Site settings templates (real files are git-ignored) | — |
 | `docs/` | INSTALL, ARCHITECTURE, ADMIN_GUIDE | — |
+| `examples/` | Optional host firewall (nftables, ufw) — not applied by the installer | — |
 | `AGENTS.md` | Documentation/code map and rules for contributors and agents | — |
 
 ## Credits

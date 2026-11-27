@@ -850,7 +850,36 @@ EOF
     delaycompress
     missingok
     notifempty
+    create 0640 root adm
 }
+EOF
+
+    # Restart policy and ordering for units that ship without one (packaged units are
+    # left untouched; these drop-ins survive package upgrades).
+    put /etc/systemd/system/nginx.service.d/restart.conf 644 root:root <<'EOF'
+[Service]
+Restart=on-failure
+RestartSec=5s
+EOF
+    put /etc/systemd/system/postgresql@.service.d/restart.conf 644 root:root <<'EOF'
+[Service]
+Restart=on-failure
+RestartSec=5s
+EOF
+    # Synapse: start after PostgreSQL instead of crash-looping until it is up; UMask
+    # keeps homeserver.log (client IPs, user IDs) and new files unreadable by other users.
+    put /etc/systemd/system/matrix-synapse.service.d/matrix.conf 644 root:root <<'EOF'
+[Unit]
+After=postgresql.service
+Wants=postgresql.service
+
+[Service]
+UMask=0027
+EOF
+    # Cap the persistent journal (default is 10 % of the filesystem).
+    put /etc/systemd/journald.conf.d/matrix.conf 644 root:root <<'EOF'
+[Journal]
+SystemMaxUse=500M
 EOF
 }
 
@@ -1011,6 +1040,7 @@ log "MAS database + admin user"
 
 log "Starting services"
 systemctl daemon-reload
+systemctl restart systemd-journald
 systemctl enable --now mas
 systemctl restart matrix-synapse
 synapse_up=false
@@ -1023,6 +1053,9 @@ systemctl enable --now livekit lk-jwt-service maubot mas-invite coturn nginx
 systemctl restart coturn nginx
 
 log "Scheduled jobs (systemd timers)"
+for f in matrix_monitor update_turn_ip refresh_certs matrix_backup; do
+    install -m 640 -o root -g adm /dev/null "/var/log/$f.log"
+done
 # Drop cron entries left by older versions of this project.
 if crontab -l >/dev/null 2>&1; then
     crontab -l | grep -v -e refresh_certs.sh -e monitor_services.sh -e update_turn_ip.sh -e backup_matrix.sh \

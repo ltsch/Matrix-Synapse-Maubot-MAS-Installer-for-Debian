@@ -89,6 +89,9 @@ CANDIDATES=(
     etc/systemd/system/lk-jwt-service.service
     etc/systemd/system/matrix-*.service etc/systemd/system/matrix-*.timer
     etc/logrotate.d/matrix-jobs
+    etc/systemd/system/nginx.service.d etc/systemd/system/postgresql@.service.d
+    etc/systemd/system/matrix-synapse.service.d etc/systemd/journald.conf.d/matrix.conf
+    etc/ssh/sshd_config.d/50-matrix-hardening.conf
     "${HERE#/}/setup.config" "${HERE#/}/refresh_certs.conf" root/matrix_credentials.txt
 )
 PATHS=()

@@ -6,6 +6,7 @@
 !/docs/
 !/lib/
 !/mas-invite/
+!/examples/
 !/install.sh
 !/upgrade_services.sh
 !/backup_matrix.sh

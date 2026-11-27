@@ -46,6 +46,8 @@ Forward these from the public IP to the Matrix host:
 | 7882 | UDP | LiveKit | MatrixRTC media (UDP mux) |
 
 Port 443 is handled by the edge proxy itself; the others are plain NAT port forwards.
+An optional host firewall matching this table is in [examples/](../examples/) (see
+ADMIN_GUIDE → *Host hardening*).
 **Federation also runs over 443**: nginx serves `/.well-known/matrix/server` pointing other
 servers at `chat.example.com:443`, so port 8448 is not needed (check with
 https://federationtester.matrix.org/).
