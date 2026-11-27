@@ -77,6 +77,58 @@ out-of-range first character is silently changed), so copy the exact URL MAS use
 `curl -s -o /dev/null -w '%{redirect_url}' https://auth.chat.example.com/upstream/authorize/<id>`
 and read its `redirect_uri` parameter.
 
+## Bots (Maubot)
+
+One bot account, `@maubot_client:<domain>`, runs every plugin. Invite it to a room and it
+joins (`autojoin`); it supports encrypted rooms. Admin UI: `https://chat.example.com/_matrix/maubot`
+(LAN only), user `admin`. The password is set in `admins:` of `/opt/maubot/config.yaml`
+(Maubot replaces it with a bcrypt hash on start); on the reference host it is kept in
+`/root/maubot_admin_password.txt` (600).
+
+Installed plugins (instance → commands):
+
+| Instance | Plugin | Commands |
+| :--- | :--- | :--- |
+| `help` | [mauhelp](https://github.com/vonDassendorf/maubot_mauhelp) | `!help` — lists every bot command |
+| `reminder` | [maubot/reminder](https://github.com/maubot/reminder) | `!remind <when> <text>`, `!remind list`, `!remind tz <zone>`; 👍 a reminder to be pinged too |
+| `dice` | [maubot/dice](https://github.com/maubot/dice) | `!roll 2d6+3` (also arithmetic) |
+| `choose` | [coffee-maubot/choose](https://github.com/coffeebank/coffee-maubot) | `!choose a \| b \| c` |
+| `timein` | [coffee-maubot/timein](https://github.com/coffeebank/coffee-maubot) | `!timein Europe/Berlin`, `!timein new york` |
+| `weather` | [maubot-weather](https://github.com/kellya/maubot-weather) | `!weather <place>` (wttr.in, no key; provider must be `wttr.in` — the default `test` returns fake data) |
+| `urlpreview` | [coffee-maubot/urlpreview](https://github.com/coffeebank/coffee-maubot) | automatic link previews (Element does not preview links in encrypted rooms) |
+| `giphy` | [GiphyMaubot](https://github.com/TomCasavant/GiphyMaubot) | `!giphy <words>` (Giphy/Tenor keys in the instance config) |
+| `xkcd` | [maubot/xkcd](https://github.com/maubot/xkcd) | `!xkcd [number]` |
+
+Uploaded but without an instance (create one in the UI when wanted): `rss` (feeds into a
+room) and `webhook` (post to a room from an HTTP call).
+
+**Adding a plugin.** Many plugins publish no current `.mbp` release, so build from source
+with Maubot's own tool (it only packages files), add any Python dependencies from the
+plugin's `maubot.yaml` to `maubot_requirements.txt`, then upload:
+
+```bash
+git clone --depth 1 https://github.com/<owner>/<plugin> /tmp/p && cd /tmp/p
+/opt/maubot/venv/bin/mbc build -o /tmp        # -> /tmp/<id>-v<version>.mbp
+# repo dir: add dependencies, then install them into the venv
+install -m 644 maubot_requirements.txt /opt/maubot/requirements.txt
+sudo -H -u maubot /opt/maubot/venv/bin/pip install -r /opt/maubot/requirements.txt
+```
+
+Upload the `.mbp` in the UI (*Plugins → +*), then create an instance with the bot as its
+user. Never install `exec`, `manhole` or `maush` — they run code on the server.
+
+**Reconnecting the bot** (new device, e.g. after rotating the pickle key):
+
+```bash
+cd /opt/mas
+sudo -u mas MAS_CONFIG=/opt/mas/config.yaml ./mas manage kill-sessions maubot_client
+sudo -u mas MAS_CONFIG=/opt/mas/config.yaml ./mas manage issue-compatibility-token maubot_client
+```
+
+Paste the printed `mct_…` token and its device ID into the client in the Maubot UI (enable it,
+keep *sync* and *autojoin* on), then `systemctl restart maubot`: Maubot only starts clients at
+startup.
+
 ## Upgrades
 
 ```bash
@@ -377,5 +429,4 @@ verifying users you share no room with); `msc3890` (depends on a feature Element
 | lk-jwt-service without Redis | In-memory state; a restart mid-call loses delayed-leave bookkeeping only. |
 | LiveKit TURN/TLS on 443 disabled | Clients on UDP-hostile networks fall back to 7881/tcp but not to TLS/443. |
 | Single TLS cert (`chat.` only) also served for `auth.` | Fine behind Caddy (`tls_insecure_skip_verify`); direct LAN access to `auth.` shows a name mismatch. |
-| Maubot bot account disabled | Plugins are installed; enable the client in the Maubot UI when needed. |
 | postfix listening on localhost:25 | Debian default, unused by the stack. |

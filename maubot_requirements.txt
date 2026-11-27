@@ -5,3 +5,7 @@ unpaddedbase64
 pycryptodome
 base58
 sqlalchemy<2.0
+# plugin dependencies (reminder, timein)
+python-dateutil
+pytz
+fuzzywuzzy

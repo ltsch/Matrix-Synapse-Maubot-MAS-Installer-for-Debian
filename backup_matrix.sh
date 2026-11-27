@@ -92,7 +92,7 @@ CANDIDATES=(
     etc/systemd/system/nginx.service.d etc/systemd/system/postgresql@.service.d
     etc/systemd/system/matrix-synapse.service.d etc/systemd/journald.conf.d/matrix.conf
     etc/ssh/sshd_config.d/50-matrix-hardening.conf
-    "${HERE#/}/setup.config" "${HERE#/}/refresh_certs.conf" root/matrix_credentials.txt
+    "${HERE#/}/setup.config" "${HERE#/}/refresh_certs.conf" root/matrix_credentials.txt root/maubot_admin_password.txt
 )
 PATHS=()
 for p in "${CANDIDATES[@]}"; do [ -e "$p" ] && PATHS+=("$p"); done

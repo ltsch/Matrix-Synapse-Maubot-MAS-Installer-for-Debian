@@ -27,6 +27,7 @@ Debian 12 by shell scripts.
 | Symptom → cause → fix | [ARCHITECTURE → Troubleshooting](docs/ARCHITECTURE.md#troubleshooting-by-symptom) |
 | Service names and log locations | [ADMIN_GUIDE → Services](docs/ADMIN_GUIDE.md#services) |
 | User management (always via MAS) | [ADMIN_GUIDE → Users](docs/ADMIN_GUIDE.md#users) |
+| Bots: installed Maubot plugins, adding one, reconnecting the bot | [ADMIN_GUIDE → Bots](docs/ADMIN_GUIDE.md#bots-maubot) |
 | Google / upstream OAuth in MAS | [ADMIN_GUIDE → Upstream OAuth](docs/ADMIN_GUIDE.md#upstream-oauth-eg-google-sign-in) |
 | Upgrading components; breaking-change sources | [ADMIN_GUIDE → Upgrades](docs/ADMIN_GUIDE.md#upgrades) |
 | Rolling back a bad upgrade (`*.prev`, `apt-mark hold`) | [ADMIN_GUIDE → Rollback](docs/ADMIN_GUIDE.md#rollback) |
