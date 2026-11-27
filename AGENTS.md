@@ -93,8 +93,10 @@ Debian 12 by shell scripts.
   before upgrading — Synapse and coturn refuse to start on removed options.
 
 ### Style and checks
-* Bash: new scripts use `set -euo pipefail` (`monitor_services.sh` and `refresh_certs.sh`
-  deliberately keep going on errors); run `shellcheck` on every changed script.
+* Bash: scripts use `set -euo pipefail` (`monitor_services.sh` uses `set -uo pipefail`: it
+  must keep going after a failed check); run `shellcheck` on every changed script.
+* Scheduled jobs must fail loudly (non-zero exit) and never leave half-done state that looks
+  valid; the monitor turns failed units into alerts.
 * Python: `python3 -m py_compile` on changed files.
 * Templates are rendered with `envsubst` over an explicit variable list (`SUBST_VARS` in
   `install.sh`); a new `${VAR}` in a template must be added to that list.

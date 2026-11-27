@@ -39,6 +39,12 @@ ELEMENT_COUNTRY_CODE="US"    # default for phone-number entry
 # Make /mnt/backup a mount point on separate storage (e.g. Proxmox mp0).
 BACKUP_DIR="/mnt/backup/matrix"
 
+# BACKUP_KEEP_DAYS=14         # delete completed backups older than this...
+# BACKUP_KEEP_MIN=3           # ...but always keep the newest N
+
 # --- Monitoring (monitor_services.sh) ----------------------------------------
 # Discord-compatible webhook for alerts (leave empty to only log)
 MONITOR_WEBHOOK_URL=""
+# MONITOR_REALERT_HOURS=6     # repeat an unchanged alert this often
+# MONITOR_CERT_WARN_DAYS=14    # alert when the TLS cert expires sooner
+# MONITOR_DISK_WARN_PCT=90     # alert when / or BACKUP_DIR is this full

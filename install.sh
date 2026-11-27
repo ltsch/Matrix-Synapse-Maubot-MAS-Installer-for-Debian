@@ -796,10 +796,22 @@ EOF
         "OnBootSec=2min" "OnCalendar=*-*-* 00:00" "Persistent=true"
 
     # Installed but NOT enabled by default: systemctl enable --now matrix-backup.timer
-    job_unit matrix-backup backup_matrix.sh matrix_backup.log infinity \
+    job_unit matrix-backup backup_matrix.sh matrix_backup.log 4h \
         "Back up Matrix databases, configs and media" "Nice=10" "IOSchedulingClass=idle"
     timer_unit matrix-backup "Nightly Matrix backup" \
         "OnCalendar=*-*-* 03:30" "Persistent=true"
+
+    # The jobs append to these files (opened per run, so no copytruncate needed).
+    put /etc/logrotate.d/matrix-jobs 644 root:root <<'EOF'
+/var/log/matrix_monitor.log /var/log/update_turn_ip.log /var/log/refresh_certs.log /var/log/matrix_backup.log {
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+}
+EOF
 }
 
 # job_unit NAME SCRIPT LOGFILE TIMEOUT DESCRIPTION [extra [Service] lines...]

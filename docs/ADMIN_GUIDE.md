@@ -18,7 +18,7 @@ systemctl restart <service>
 | mas, mas-invite, livekit, lk-jwt-service, maubot, coturn | `journalctl -u <service> -f` |
 | nginx | `/var/log/nginx/access.log`, `error.log` |
 | PostgreSQL | `/var/log/postgresql/postgresql-<ver>-main.log` |
-| scheduled jobs (`matrix-*.timer`) | `/var/log/update_turn_ip.log`, `matrix_monitor.log`, `refresh_certs.log`, `matrix_backup.log` |
+| scheduled jobs (`matrix-*.timer`) | `/var/log/update_turn_ip.log`, `matrix_monitor.log`, `refresh_certs.log`, `matrix_backup.log` (rotated weekly) |
 
 Restart order after config changes that touch both: `mas` → `matrix-synapse` → the rest.
 
@@ -110,16 +110,26 @@ pg_dropcluster <old> main && apt-get purge postgresql-<old> postgresql-client-<o
 `backup_matrix.sh` writes `$BACKUP_DIR/<timestamp>/` (`BACKUP_DIR` in `setup.config`,
 default `/mnt/backup/matrix`): `globals.sql` (database roles and passwords), custom-format
 dumps of the three databases, `files.tgz` (configs, secrets, signing keys, nginx, systemd
-units, `setup.config`) and `media.tgz`; keeps 14 days. `matrix-backup.timer` (03:30 nightly)
-is installed but **not enabled by default** (it is enabled on the reference deployment):
+units, `setup.config`) and `media.tgz`. `matrix-backup.timer` (03:30 nightly) is installed
+but **not enabled by default** (it is enabled on the reference deployment):
 
 ```bash
 systemctl start matrix-backup.service          # first run; check /var/log/matrix_backup.log
 systemctl enable --now matrix-backup.timer     # nightly from then on
 ```
 
-Once enabled, `monitor_services.sh` alerts if the timer stops or the newest backup is older
-than 36 h.
+How a run works, so a failure can never look like a good backup:
+* It writes into `.partial-<timestamp>`, verifies everything (roles present, each dump
+  readable by `pg_restore --list`, both archives readable, `homeserver.yaml`, the MAS config
+  and the Synapse signing key present in `files.tgz`), then renames the folder and writes a
+  `COMPLETE` marker. A failed run leaves nothing behind; the unit shows as failed.
+* Retention counts only completed backups: those older than `BACKUP_KEEP_DAYS` (14) are
+  deleted, but the newest `BACKUP_KEEP_MIN` (3) are always kept.
+* A lock prevents a manual run and the timer run overlapping; a run is killed after 4 h.
+* Once the timer is enabled, `monitor_services.sh` alerts if it stops or no completed backup
+  is newer than 36 h.
+
+`files.tgz` holds plaintext secrets — keep the backup folder (mode 700) and any copy restricted.
 
 `/mnt/backup` is a plain directory on the container's own disk until you give it separate
 storage — e.g. a Proxmox mount point (`pct set <vmid> -mp0 <storage>:<size>,mp=/mnt/backup`)
@@ -132,9 +142,14 @@ restart services (`mas` → `matrix-synapse` → the rest).
 
 ## Certificates
 
-`refresh_certs.sh` (`matrix-refresh-certs.timer`: nightly and after boot) fetches `matrix.crt`/`matrix.key` from `CERT_SOURCE_URL`
-(`refresh_certs.conf`), installs them for nginx and coturn, reloads both. Errors appear in
-`/var/log/refresh_certs.log`. Check expiry:
+`refresh_certs.sh` (`matrix-refresh-certs.timer`: nightly and after boot) downloads
+`<CERT_NAME>.crt`/`.key` from `CERT_SOURCE_URL` (`refresh_certs.conf`). If they differ from the
+installed pair it installs them only after checking that the certificate is valid for
+`CERT_NAME`, does not expire within 24 h, and matches the key. It then runs `nginx -t`
+(restoring the old pair if that fails), reloads nginx, and copies the pair to coturn
+(`/etc/turn_server_*.pem`) and restarts it. Any failure exits non-zero, so the unit shows as
+failed and the monitor alerts; the monitor also alerts 14 days before the installed cert
+expires. Log: `/var/log/refresh_certs.log`. Check expiry:
 `openssl x509 -enddate -noout -in /etc/nginx/ssl/matrix.crt`.
 
 ## Public IP changes
@@ -142,11 +157,14 @@ restart services (`mas` → `matrix-synapse` → the rest).
 coturn and LiveKit must advertise the current public IP. `matrix-turn-ip.timer` runs
 `update_turn_ip.sh` every 30 s. It asks OpenDNS which address it sees us from
 (`myip.opendns.com`), so it does not wait for DDNS to catch up. If that fails it resolves
-`TURN_DDNS_HOST`, then tries `ifconfig.me`. When the IP changes it rewrites
-`external-ip=<public>/<LAN>` in `/etc/turnserver.conf` and restarts coturn and LiveKit,
-so calls recover within about 30 s plus restart time. That restart drops calls in
+`TURN_DDNS_HOST`, then tries `ifconfig.me`. Only a routable public IPv4 address is accepted
+(private, CGNAT, loopback, link-local and reserved answers are ignored). A new address must be
+seen on two consecutive runs before it is applied, so one odd lookup never restarts anything.
+Then it rewrites `external-ip=<public>/<LAN>` in `/etc/turnserver.conf` and restarts coturn
+and LiveKit: calls recover about a minute after the change. That restart drops calls in
 progress, but they are already broken once the public IP moves. The script is silent when
-nothing changed; changes go to `/var/log/update_turn_ip.log`.
+nothing changed; changes go to `/var/log/update_turn_ip.log`. If no source returns a usable
+address the run fails, which the monitor reports.
 
 ```bash
 systemctl list-timers matrix-turn-ip.timer     # last/next run
@@ -155,9 +173,29 @@ systemctl start matrix-turn-ip.service         # run now
 
 ## Monitoring
 
-`monitor_services.sh` (`matrix-monitor.timer`, every 5 min) checks all services, the job
-timers and key endpoints, and posts to `MONITOR_WEBHOOK_URL` on failure (log lines are
-timestamped; the run exits 1, so it also shows in `systemctl --failed`). Test with `./monitor_services.sh --test`.
+`monitor_services.sh` (`matrix-monitor.timer`, every 5 min) checks:
+
+* every service and the job timers are active;
+* the real PostgreSQL cluster units (`postgresql@<ver>-main`; `postgresql.service` is only a
+  wrapper that always looks active) and that PostgreSQL accepts connections (`pg_isready`);
+* no systemd unit is in the failed state (catches a failed backup, cert refresh or IP sync);
+* a completed backup newer than 36 h (once `matrix-backup.timer` is enabled);
+* the TLS certificate does not expire within `MONITOR_CERT_WARN_DAYS` (14);
+* `/` and `BACKUP_DIR` are below `MONITOR_DISK_WARN_PCT` (90 %) full;
+* the client API, federation, MAS and lk-jwt-service endpoints and the Maubot UI answer through
+  the public names without a 5xx.
+
+Alerts go to `MONITOR_WEBHOOK_URL` (Discord-compatible) only when a problem appears or the set of
+problems changes, again every `MONITOR_REALERT_HOURS` (6) while it persists, and once as
+**RESOLVED** when everything passes (state in `/var/lib/matrix-monitor/`). A delivery failure
+is logged and retried on the next run. Every failing run is logged with a timestamp and exits 1.
+
+```bash
+./monitor_services.sh --test     # send a multi-line test message to the webhook
+./monitor_services.sh; echo $?   # run the checks now (silent and 0 when healthy)
+```
+
+Job logs in `/var/log/` are rotated weekly (8 kept, compressed) by `/etc/logrotate.d/matrix-jobs`.
 
 ## Configuration reference
 
