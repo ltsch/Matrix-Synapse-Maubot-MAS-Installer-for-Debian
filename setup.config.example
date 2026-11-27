@@ -24,6 +24,10 @@ TURN_DDNS_HOST="home.example.com"
 # false = private server: no contact with any other Matrix server (docs/PRIVATE_SERVER.md).
 FEDERATION_ENABLED="true"
 
+# --- Rooms every new account joins ----------------------------------------------
+# Space-separated room alias localparts, e.g. "general" -> #general:<MATRIX_FQDN>.
+# AUTO_JOIN_ROOMS="general"
+
 # --- Initial admin (created in MAS) -----------------------------------------
 ADMIN_USER="admin"
 # ADMIN_PASS=""              # generated and saved to /root/matrix_credentials.txt if empty

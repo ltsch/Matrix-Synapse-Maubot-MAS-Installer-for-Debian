@@ -29,6 +29,7 @@ Debian 12 by shell scripts.
 | User management (always via MAS) | [ADMIN_GUIDE → Users](docs/ADMIN_GUIDE.md#users) |
 | Private server: federation off, encryption by default, push/profile privacy, Element lock-down (pros/cons, undo) | [docs/PRIVATE_SERVER.md](docs/PRIVATE_SERVER.md) |
 | Federation switch (`FEDERATION_ENABLED`) and what it renders | [PRIVATE_SERVER → Federation off](docs/PRIVATE_SERVER.md#federation-off) |
+| Rooms new accounts join automatically (`AUTO_JOIN_ROOMS`) | [ADMIN_GUIDE → Users](docs/ADMIN_GUIDE.md#users) |
 | Supported apps, signing in, QR sign-in, push | [ADMIN_GUIDE → Clients](docs/ADMIN_GUIDE.md#clients-desktop-and-mobile) |
 | Bots: installed Maubot plugins, adding one, reconnecting the bot | [ADMIN_GUIDE → Bots](docs/ADMIN_GUIDE.md#bots-maubot) |
 | Google / upstream OAuth in MAS | [ADMIN_GUIDE → Upstream OAuth](docs/ADMIN_GUIDE.md#upstream-oauth-eg-google-sign-in) |

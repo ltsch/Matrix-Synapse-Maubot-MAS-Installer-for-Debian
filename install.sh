@@ -77,6 +77,7 @@ source "$HERE/setup.config"
 : "${SMTP_HOST:=}" "${SMTP_PORT:=587}" "${SMTP_USER:=}" "${SMTP_PASS:=}" "${SMTP_FROM:=}" "${SMTP_REPLY_TO:=${SMTP_FROM}}"
 : "${MAPTILER_KEY:=}"
 : "${FEDERATION_ENABLED:=true}"   # false = private server (docs/PRIVATE_SERVER.md)
+: "${AUTO_JOIN_ROOMS:=}"          # e.g. "general announcements" -> new users join #general:<server>, ...
 case "$FEDERATION_ENABLED" in true|false) ;; *) die "FEDERATION_ENABLED must be true or false" ;; esac
 
 # Federation on/off changes a few rendered blocks (see docs/PRIVATE_SERVER.md).
@@ -309,6 +310,16 @@ EOF
     put /etc/matrix-synapse/conf.d/registration.yaml 640 root:matrix-synapse <<'EOF'
 registration_shared_secret: ${REG_SECRET}
 EOF
+    if [ -n "$AUTO_JOIN_ROOMS" ]; then
+        local r rooms=""
+        for r in $AUTO_JOIN_ROOMS; do rooms+="  - \"#${r#\#}:${MATRIX_FQDN}\""$'\n'; done
+        { printf '# New accounts (including those MAS creates) join these rooms. Managed by install.sh\n'
+          printf '# from AUTO_JOIN_ROOMS in setup.config. A missing room is created as a public room by\n'
+          printf '# the first new user.\nauto_join_rooms:\n%s' "$rooms"; } \
+            | put /etc/matrix-synapse/conf.d/auto-join.yaml 644 root:matrix-synapse
+    elif [ -z "$RENDER_DIR" ]; then
+        rm -f /etc/matrix-synapse/conf.d/auto-join.yaml
+    fi
     if [ "$FEDERATION_ENABLED" = false ]; then
         put /etc/matrix-synapse/conf.d/federation.yaml 644 root:matrix-synapse <<'EOF'
 # Private server (FEDERATION_ENABLED=false in setup.config): an empty allow-list means

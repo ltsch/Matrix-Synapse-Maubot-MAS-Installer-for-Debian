@@ -63,6 +63,16 @@ Any email address is accepted; the token is the gate. Signing **in** with Google
 that already exists never asks for a token. Password reset by email is enabled when SMTP is
 configured. `./manage_users.py list` shows every account; check it after handing out tokens.
 
+**Rooms every new account joins.** `AUTO_JOIN_ROOMS` in `setup.config` (space-separated alias
+localparts, e.g. `"general"`) renders `/etc/matrix-synapse/conf.d/auto-join.yaml`
+(`auto_join_rooms`). Synapse applies it when MAS provisions a new account, so it covers password
+and Google sign-ups alike. The room must be joinable by local users (join rule *public*); a
+missing room is created as public by the first new user. It does not add **existing** accounts —
+join them with the admin API, e.g.
+`curl -X POST -H "Authorization: Bearer <admin token>" -d '{"user_id":"@alice:chat.example.com"}' https://chat.example.com/_synapse/admin/v1/join/%23general:chat.example.com`
+(or Synapse-Admin → *Rooms*). To change the list, edit `auto-join.yaml` (or re-render) and
+restart `matrix-synapse`.
+
 **Synapse-Admin** (`/synapse-admin`, LAN only): sign in with *password* (not SSO) using a
 MAS admin account; nginx routes that login to MAS's compatibility layer.
 
