@@ -19,7 +19,7 @@ The federation switch is a site setting (`FEDERATION_ENABLED` in `setup.config`,
 | Profiles need sign-in | `require_auth_for_profile_requests` (`homeserver.yaml`) | `true` | `true` |
 | Room directory not public | `allow_public_rooms_without_auth`, `allow_public_rooms_over_federation` | `false` | `false` |
 | Element Web locked to this server | `disable_custom_urls`, `disable_guests`, `disable_3pid_login`, `room_directory`, no `jitsi` (`config.json`) | as listed | as listed |
-| Invite-only registration | MAS + `/register` invite page | on | on |
+| Invite-only registration | MAS `password_registration_token_required` + provider `registration_token_required`, `/register` invite page | on | on |
 | No third-party services | no identity server, `trusted_key_servers: []`, `report_stats: false`, no integration manager / bug reports | — | — |
 
 ## Federation off
@@ -127,7 +127,9 @@ Desktop/X) for it — this web client is for this server only.
 
 ## Already private before this page
 
-* Registration is invite-only (MAS registration tokens via the `/register` page).
+* Registration is invite-only: MAS requires a registration token (from the `/register` page)
+  for password **and** Google sign-up (`registration_token_required: true` on the provider —
+  its default `false` would let anyone with a Google account register).
 * No identity server (`vector.im` removed): no email/phone lookups leave the server.
 * `trusted_key_servers: []`, `report_stats: false`, no integration manager, no bug-report
   upload, no analytics.

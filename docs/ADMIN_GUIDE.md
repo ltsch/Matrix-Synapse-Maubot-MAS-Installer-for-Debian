@@ -46,9 +46,22 @@ editing Synapse's database (that is how accounts end up half-existing).
 ./manage_users.py invite --uses 1 --days 7
 ```
 
-Self-service registration is invite-only: `https://chat.example.com/register` (mas-invite,
-behind Caddy auth) mints a 5-use, 30-day token and shows the MAS registration link.
-Password reset by email is enabled when SMTP is configured.
+**Registration is invite-only.** `https://chat.example.com/register` (mas-invite, behind
+Caddy auth) mints a 5-use, 30-day **registration token** and shows the steps. The friend opens
+`https://auth.chat.example.com/register`, chooses *Continue with Google* **or** a username and
+password, and MAS then asks for the token (it cannot be passed in the link — the old
+`?ticket=` parameter was ignored). Every sign-up path needs a token:
+
+| MAS setting | Value | Why |
+| :--- | :--- | :--- |
+| `account.password_registration_enabled` | `true` | offer username/password sign-up (without it MAS sends people straight to the only upstream provider) |
+| `account.password_registration_token_required` | `true` | password sign-up needs a token |
+| `account.password_registration_email_required` | `true` with SMTP | verified email, used for password reset |
+| `upstream_oauth2.providers[].registration_token_required` | `true` | **Google sign-up needs a token too** — the default is `false`, which lets *anyone* with a Google account register |
+
+Any email address is accepted; the token is the gate. Signing **in** with Google to an account
+that already exists never asks for a token. Password reset by email is enabled when SMTP is
+configured. `./manage_users.py list` shows every account; check it after handing out tokens.
 
 **Synapse-Admin** (`/synapse-admin`, LAN only): sign in with *password* (not SSO) using a
 MAS admin account; nginx routes that login to MAS's compatibility layer.
@@ -67,6 +80,7 @@ upstream_oauth2:
       client_secret: "<client secret>"
       token_endpoint_auth_method: client_secret_post
       scope: "openid profile email"
+      registration_token_required: true   # REQUIRED for invite-only: default false = open sign-up
 ```
 
 ```bash

@@ -236,6 +236,8 @@ All of these files are mode 600/640 and owned by the service that reads them.
 
 | Symptom | Likely cause | Check |
 | :--- | :--- | :--- |
+| *Register* jumps straight to Google, no username/password option | `account.password_registration_enabled` is off (MAS skips the choice when only one method exists) | ADMIN_GUIDE → Users → registration table |
+| Someone registered without an invite | Upstream provider lacks `registration_token_required: true` | `./manage_users.py list`; set it, `mas config sync --prune`, restart `mas` |
 | A call never connects; lk-jwt-service logs `OpenIDUserInfo ... status=404` | nginx blocks `/_matrix/federation/v1/openid/userinfo` (private server) | that one location must proxy to Synapse — [PRIVATE_SERVER.md](PRIVATE_SERVER.md#federation-off) |
 | Can't join or DM someone on another server | Federation is off by design | [PRIVATE_SERVER.md](PRIVATE_SERVER.md#federation-off) |
 | No *Sign in with QR code* / *Link new device* option | App too old, or the rendezvous is off | `curl -s https://chat.example.com/_matrix/client/versions` must show `org.matrix.msc4108: true`; update the app |

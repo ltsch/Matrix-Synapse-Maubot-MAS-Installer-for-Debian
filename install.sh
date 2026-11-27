@@ -377,7 +377,13 @@ cfg = {
   "passwords": {"enabled": True, "schemes": [{"version": 1, "algorithm": "bcrypt"}], "minimum_complexity": 3},
   "matrix": {"kind": "synapse", "homeserver": e["MATRIX_FQDN"], "secret": e["MAS_MATRIX_SECRET"],
              "endpoint": "http://localhost:8008/"},
-  "account": {"password_recovery_enabled": bool(e.get("SMTP_HOST"))},
+  # Sign-up is invite-only: password sign-up needs a registration token (from the /register
+  # invite page); upstream providers (e.g. Google) must set registration_token_required too.
+  # Email verification needs SMTP.
+  "account": {"password_recovery_enabled": bool(e.get("SMTP_HOST")),
+              "password_registration_enabled": True,
+              "password_registration_token_required": True,
+              "password_registration_email_required": bool(e.get("SMTP_HOST"))},
 }
 if e.get("SMTP_HOST"):
     cfg["email"] = {"from": f'"Authentication Service" <{e["SMTP_FROM"]}>',

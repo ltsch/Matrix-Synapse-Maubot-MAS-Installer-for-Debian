@@ -30,6 +30,8 @@ HTML = """
         button { padding: 15px 30px; font-size: 18px; cursor: pointer; background: #008080; color: white; border: none; border-radius: 5px; }
         button:hover { background: #006666; }
         .code { margin-top: 20px; padding: 15px; background: #f0f0f0; border-radius: 5px; word-break: break-all; }
+        .token { font-family: monospace; font-size: 22px; letter-spacing: 1px; user-select: all; }
+        ol { text-align: left; }
     </style>
 </head>
 <body>
@@ -39,10 +41,14 @@ HTML = """
     </form>
     {% if token %}
         <div class="code">
-            <strong>Token Code:</strong> {{ token }}<br>
-            <small>(Valid for 5 uses, expires in 30 days)</small><br><br>
-            <strong>Registration Link:</strong><br>
-            <a href="{{ base }}/register?ticket={{ token }}">{{ base }}/register?ticket={{ token }}</a>
+            <strong>Invite token</strong> <small>(valid for 5 sign-ups, expires in 30 days)</small><br>
+            <span class="token">{{ token }}</span>
+            <ol>
+                <li>Open <a href="{{ base }}/register">{{ base }}/register</a></li>
+                <li>Choose <em>Continue with Google</em> or create a username and password</li>
+                <li>When asked for a <strong>registration token</strong>, paste the token above</li>
+                <li>Then sign in with Element (web, desktop or Element X) using that account</li>
+            </ol>
         </div>
     {% endif %}
     {% if error %}
