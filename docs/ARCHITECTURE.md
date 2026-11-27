@@ -1,5 +1,7 @@
 # Architecture
 
+> Docs: [README](../README.md) · [INSTALL](INSTALL.md) · [ARCHITECTURE](ARCHITECTURE.md) · [ADMIN_GUIDE](ADMIN_GUIDE.md) · [AGENTS](../AGENTS.md)
+
 How the stack fits together, which ports and files matter, and how requests flow —
 written for troubleshooting. Names use the examples from `setup.config.example`:
 homeserver `chat.example.com`, auth `auth.chat.example.com`, this host `192.168.1.100`,

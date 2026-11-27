@@ -34,6 +34,7 @@ Prerequisites (DNS, port forwards, edge proxy config) are in **[docs/INSTALL.md]
 * [docs/INSTALL.md](docs/INSTALL.md) — prerequisites, firewall ports, Caddy example, install, verify
 * [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — component diagram, ports, request flows, secrets, troubleshooting
 * [docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md) — users, upgrades, backups, certificates, configuration reference, known limitations
+* [AGENTS.md](AGENTS.md) — documentation/code map and rules for contributors and AI agents
 
 ## Repository layout
 

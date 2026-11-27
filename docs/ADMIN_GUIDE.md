@@ -1,5 +1,7 @@
 # Administration Guide
 
+> Docs: [README](../README.md) · [INSTALL](INSTALL.md) · [ARCHITECTURE](ARCHITECTURE.md) · [ADMIN_GUIDE](ADMIN_GUIDE.md) · [AGENTS](../AGENTS.md)
+
 Day-to-day operation of the stack. Architecture, ports and troubleshooting tables are in
 [ARCHITECTURE.md](ARCHITECTURE.md). Commands assume you are root in the repo directory.
 

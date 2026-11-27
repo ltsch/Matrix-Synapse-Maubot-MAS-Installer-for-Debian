@@ -1,5 +1,7 @@
 # Installation
 
+> Docs: [README](../README.md) · [INSTALL](INSTALL.md) · [ARCHITECTURE](ARCHITECTURE.md) · [ADMIN_GUIDE](ADMIN_GUIDE.md) · [AGENTS](../AGENTS.md)
+
 `install.sh` builds the whole stack on a **fresh Debian 12 (bookworm)** LXC or VM. It refuses
 to run over an existing installation — use `upgrade_services.sh` for updates.
 See [ARCHITECTURE.md](ARCHITECTURE.md) for how the pieces connect.
