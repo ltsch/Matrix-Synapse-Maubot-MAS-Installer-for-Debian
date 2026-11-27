@@ -163,6 +163,20 @@ against MAS (`matrix_authentication_service.endpoint`, shared `secret`).
 is routed by nginx straight to MAS's compatibility layer. Synapse-Admin still calls `r0`
 paths; nginx rewrites `r0` → `v3`.
 
+**Sign in with QR code.** The new device (e.g. Element X) and a signed-in device (Element
+Web/Desktop *Link new device*) exchange messages through a short-lived **rendezvous** session on
+Synapse — `POST /_matrix/client/unstable/org.matrix.msc4108/rendezvous` (2024 version) or
+`.../io.element.msc4388/rendezvous` (2025 version); both are enabled, sessions expire after
+2 minutes. Over that end-to-end encrypted channel the signed-in device approves the login,
+which MAS completes with the OAuth **device authorization grant**
+(`auth.chat.example.com/oauth2/device`), and hands over the encryption secrets, so the new
+device starts out verified.
+
+**Push notifications (mobile).** Element X / Element Android / iOS register a pusher with
+Synapse pointing at Element's push gateway (`https://matrix.org/_matrix/push/v1/notify`, or a
+UnifiedPush distributor). Synapse sends each notification there over outbound HTTPS; the
+gateway forwards it to FCM / APNs. Pushers: `pushers` table in `synapse_db`.
+
 **Account provisioning.** MAS owns users. When a user is created/locked/deactivated in MAS,
 MAS calls Synapse's `/_synapse/mas/*` endpoints (localhost) to mirror it. If that fails,
 MAS logs `Job failed, will retry` and Synapse logs errors on `MasProvisionUserResource`;
@@ -218,6 +232,9 @@ All of these files are mode 600/640 and owned by the service that reads them.
 
 | Symptom | Likely cause | Check |
 | :--- | :--- | :--- |
+| No *Sign in with QR code* / *Link new device* option | App too old, or the rendezvous is off | `curl -s https://chat.example.com/_matrix/client/versions` must show `org.matrix.msc4108: true`; update the app |
+| QR scan fails or times out | Session expired (2 min) or edge proxy blocks the rendezvous path | retry promptly; `POST /_matrix/client/unstable/org.matrix.msc4108/rendezvous` from outside should return 201 |
+| No push notifications on a phone | Pusher missing/failing, or outbound HTTPS to the push gateway blocked | `select app_id, last_success, failing_since from pushers` in `synapse_db`; `curl https://matrix.org/_matrix/push/v1/notify` from the host |
 | Synapse restarts in a loop after an upgrade | Removed/renamed config option | `journalctl -u matrix-synapse -n 30` → `Error in configuration at ...`; read the Synapse upgrade notes |
 | `chat.` returns the MAS "Page not found", `/_matrix/*` 404 | Edge proxy not sending the original `Host` | nginx access log; ensure Caddy `header_up Host {host}` and that Caddy reloaded |
 | Everyone's IP is the edge proxy's in logs | `realip` not trusting the proxy | `/etc/nginx/conf.d/realip.conf` `set_real_ip_from` = edge IP |

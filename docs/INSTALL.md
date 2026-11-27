@@ -186,5 +186,8 @@ grep '^external-ip' /etc/turnserver.conf                                 # exter
   `/_matrix/client/v3/voip/turnServer` (signed-in request); a `relay` candidate with your
   public IP means TURN works.
 
+**QR sign-in.** On Element Web open *Settings → Sessions → Link new device* and scan the code
+with Element X on a phone (mobile data); the phone should end up signed in and verified.
+
 Then open `https://chat.example.com`, sign in as the admin, and check federation at
 https://federationtester.matrix.org/.

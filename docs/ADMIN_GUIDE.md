@@ -81,6 +81,34 @@ out-of-range first character is silently changed), so copy the exact URL MAS use
 `curl -s -o /dev/null -w '%{redirect_url}' https://auth.chat.example.com/upstream/authorize/<id>`
 and read its `redirect_uri` parameter.
 
+## Clients (desktop and mobile)
+
+| Platform | App | Notes |
+| :--- | :--- | :--- |
+| Browser | Element Web at `https://chat.example.com` | hosted on this server |
+| Windows / macOS / Linux | Element Desktop | same features as Element Web |
+| Android / iOS | **Element X** | the current mobile app (fast sync, calls, QR sign-in); classic Element Android/iOS still work but are being retired |
+
+Everything the apps need is in place: server discovery (`.well-known`, CORS), sign-in through
+MAS (apps register themselves automatically), simplified sliding sync for Element X, MatrixRTC
+calls, push via Element's gateway, authenticated media (50 MB uploads).
+
+**Signing in.** Enter `chat.example.com` as the server; the app opens MAS
+(`auth.chat.example.com`) to sign in. There is no *Create account* in the apps: new accounts
+come from the invite page `https://chat.example.com/register` (see *Users*).
+
+**Sign in with QR code** (new device starts out verified, no recovery key needed):
+1. On a device that is already signed in — Element Web/Desktop: *Settings → Sessions →
+   Link new device* — a QR code appears.
+2. On the new phone, Element X: *Sign in with QR code*, scan it, confirm the code shown on
+   both screens.
+
+Both rendezvous versions are enabled (`msc4108_enabled`, `msc4388_mode` — see *Configuration
+reference*). If the option is missing, update the app.
+
+**Check that a client works** (from outside the LAN, e.g. a phone on mobile data): sign in,
+send a message, receive a push notification while the app is closed, and place a call.
+
 ## Bots (Maubot)
 
 One bot account, `@maubot_client:<domain>`, runs every plugin. Invite it to a room and it
