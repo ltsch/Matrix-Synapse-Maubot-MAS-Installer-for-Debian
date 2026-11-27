@@ -785,8 +785,9 @@ EOF
     timer_unit matrix-turn-ip "Check the public IP for coturn/LiveKit every 30 seconds" \
         "OnBootSec=30s" "OnUnitActiveSec=30s" "AccuracySec=1s"
 
+    # Exit 1 = "found problems" (already alerted), not a failure of the monitor itself.
     job_unit matrix-monitor monitor_services.sh matrix_monitor.log 2min \
-        "Check Matrix services and endpoints, alert via webhook"
+        "Check Matrix services and endpoints, alert via webhook" "SuccessExitStatus=1"
     timer_unit matrix-monitor "Matrix health check every 5 minutes" \
         "OnBootSec=3min" "OnCalendar=*:0/5" "AccuracySec=10s"
 
