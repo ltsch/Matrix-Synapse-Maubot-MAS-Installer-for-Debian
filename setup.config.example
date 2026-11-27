@@ -14,7 +14,8 @@ LAN_IP="192.168.1.100"
 # nginx trusts X-Forwarded-For only from this address.
 EDGE_PROXY_IP="192.168.1.1"
 # A hostname that always resolves to your public IP (DDNS). coturn advertises it;
-# update_turn_ip.sh re-checks it every 15 minutes.
+# update_turn_ip.sh checks the real public IP every 30 s (direct OpenDNS query)
+# and falls back to this name if that fails.
 TURN_DDNS_HOST="home.example.com"
 # PUBLIC_IP="203.0.113.10"   # optional override if TURN_DDNS_HOST cannot be resolved
 

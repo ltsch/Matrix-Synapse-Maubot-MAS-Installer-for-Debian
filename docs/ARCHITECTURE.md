@@ -177,6 +177,7 @@ All of these files are mode 600/640 and owned by the service that reads them.
 | Calls: join works, no audio/video | Media ports or public IP | Forwards for 7881/tcp, 7882/udp; `journalctl -u livekit \| grep "external IP"` should say `using external IPs <public>/<LAN>` |
 | Calls: "failed to get token" | lk-jwt-service / appservice wiring | `journalctl -u lk-jwt-service`; `curl -s 127.0.0.1:8083/healthz`; `matrix_rtc` + `msc4502/4512` flags in Synapse |
 | Legacy calls relay `127.0.0.1` or fail across NAT | coturn `relay-ip`/`external-ip` | `grep -E 'relay-ip|external-ip' /etc/turnserver.conf`; `update_turn_ip.sh` log |
+| All calls fail right after an ISP IP change | coturn/LiveKit still advertising the old IP | `systemctl list-timers matrix-turn-ip.timer`; `/var/log/update_turn_ip.log`; `systemctl start matrix-turn-ip.service` |
 | Browser cert warning on LAN, coturn TLS fails | Expired cert from the edge | `/var/log/refresh_certs.log`; `openssl x509 -enddate -in /etc/nginx/ssl/matrix.crt` |
 | Google sign-in "redirect_uri_mismatch" | Callback URL vs provider ULID | MAS sends `https://auth.../upstream/callback/<provider id as MAS normalises it>` — copy it from MAS, not from config |
 | Monitor alert | Service down or endpoint failing | `journalctl -u <service> -n 50`; `/var/log/matrix_monitor.log` |

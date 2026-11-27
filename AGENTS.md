@@ -45,7 +45,7 @@ Debian 12 by shell scripts.
 | [upgrade_services.sh](upgrade_services.sh) | Upgrade everything in place, restart in order, health-check. |
 | [manage_users.py](manage_users.py) | User admin; every write goes through the MAS CLI. |
 | [monitor_services.sh](monitor_services.sh) | Cron health check + webhook alerts. |
-| [update_turn_ip.sh](update_turn_ip.sh) | Cron public-IP sync for coturn/LiveKit. |
+| [update_turn_ip.sh](update_turn_ip.sh) | Public-IP sync for coturn/LiveKit, run every 30 s by `matrix-turn-ip.timer` (units rendered in `render_system`). |
 | [refresh_certs.sh](refresh_certs.sh) | Cron TLS cert pull from the edge proxy. |
 | [backup_matrix.sh](backup_matrix.sh) | DB dumps + configs + media, 14-day retention. |
 | [mas-invite/invite_gen.py](mas-invite/invite_gen.py) | Flask invite-token page (deployed to `/opt/mas/invite_gen.py`). |

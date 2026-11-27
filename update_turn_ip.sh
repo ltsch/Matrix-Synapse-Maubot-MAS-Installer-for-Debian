@@ -6,7 +6,12 @@
 # relaying on the LAN IP: external-ip=<public>/<private>. If this is wrong,
 # coturn hands out unreachable relay addresses and calls fail to connect.
 #
-# Run from cron; only restarts coturn when the IP actually changes.
+# Runs every 30 s from matrix-turn-ip.timer; restarts coturn/LiveKit only when
+# the IP actually changes (that drops in-progress calls, but they are already
+# broken once the public IP has moved).
+#
+# Lookup order: direct query (OpenDNS reports the address it sees us from, so
+# there is no DDNS update lag) -> TURN_DDNS_HOST -> ifconfig.me.
 
 set -euo pipefail
 
@@ -22,10 +27,15 @@ CONF=/etc/turnserver.conf
 
 is_ipv4() { [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; }
 
-PUBLIC_IP=$(dig +short "$DDNS_HOST" A | grep -E '^[0-9.]+$' | tail -n 1 || true)
+first_ipv4() { grep -E '^[0-9.]+$' | tail -n 1 || true; }
+
+PUBLIC_IP=$(dig +short +time=2 +tries=1 myip.opendns.com A @resolver1.opendns.com 2>/dev/null | first_ipv4)
 if ! is_ipv4 "$PUBLIC_IP"; then
-    echo "$(date -Is) Failed to resolve $DDNS_HOST, falling back to ifconfig.me"
-    PUBLIC_IP=$(curl -fsS -4 -m 10 https://ifconfig.me || true)
+    PUBLIC_IP=$(dig +short +time=2 +tries=2 "$DDNS_HOST" A 2>/dev/null | first_ipv4)
+fi
+if ! is_ipv4 "$PUBLIC_IP"; then
+    echo "$(date -Is) Direct lookup and $DDNS_HOST failed, falling back to ifconfig.me"
+    PUBLIC_IP=$(curl -fsS -4 -m 5 https://ifconfig.me || true)
 fi
 if ! is_ipv4 "$PUBLIC_IP"; then
     echo "$(date -Is) ERROR: could not determine public IP"

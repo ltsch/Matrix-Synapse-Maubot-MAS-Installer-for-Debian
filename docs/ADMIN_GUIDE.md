@@ -18,7 +18,7 @@ systemctl restart <service>
 | mas, mas-invite, livekit, lk-jwt-service, maubot, coturn | `journalctl -u <service> -f` |
 | nginx | `/var/log/nginx/access.log`, `error.log` |
 | PostgreSQL | `/var/log/postgresql/postgresql-<ver>-main.log` |
-| cron jobs | `/var/log/refresh_certs.log`, `matrix_monitor.log`, `update_turn_ip.log`, `matrix_backup.log` |
+| cron jobs / timers | `/var/log/refresh_certs.log`, `matrix_monitor.log`, `update_turn_ip.log` (`matrix-turn-ip.timer`), `matrix_backup.log` |
 
 Restart order after config changes that touch both: `mas` → `matrix-synapse` → the rest.
 
@@ -125,9 +125,19 @@ Restore: `sudo -u postgres pg_restore --clean --if-exists -d <db> <db>.dump`;
 
 ## Public IP changes
 
-coturn and LiveKit must advertise the current public IP. `update_turn_ip.sh` (every 15 min)
-resolves `TURN_DDNS_HOST`, rewrites `external-ip=<public>/<LAN>` in `/etc/turnserver.conf`
-and restarts coturn and LiveKit when it changes. It is silent when nothing changed.
+coturn and LiveKit must advertise the current public IP. `matrix-turn-ip.timer` runs
+`update_turn_ip.sh` every 30 s. It asks OpenDNS which address it sees us from
+(`myip.opendns.com`), so it does not wait for DDNS to catch up. If that fails it resolves
+`TURN_DDNS_HOST`, then tries `ifconfig.me`. When the IP changes it rewrites
+`external-ip=<public>/<LAN>` in `/etc/turnserver.conf` and restarts coturn and LiveKit,
+so calls recover within about 30 s plus restart time. That restart drops calls in
+progress, but they are already broken once the public IP moves. The script is silent when
+nothing changed; changes go to `/var/log/update_turn_ip.log`.
+
+```bash
+systemctl list-timers matrix-turn-ip.timer     # last/next run
+systemctl start matrix-turn-ip.service         # run now
+```
 
 ## Monitoring
 

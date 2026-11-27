@@ -328,7 +328,7 @@ min-port=49152
 max-port=50000
 
 # NAT: relay on the LAN IP, advertise the public IP (public/private).
-# external-ip is kept current by update_turn_ip.sh (cron).
+# external-ip is kept current by update_turn_ip.sh (matrix-turn-ip.timer, every 30 s).
 relay-ip=${LAN_IP}
 external-ip=${PUBLIC_IP}/${LAN_IP}
 
@@ -778,6 +778,31 @@ EOF
 APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
 EOF
+    # Public-IP sync for coturn/LiveKit every 30 s (cron cannot go below 1 min).
+    put /etc/systemd/system/matrix-turn-ip.service 644 root:root <<EOF
+[Unit]
+Description=Sync coturn/LiveKit external IP with the current public IP
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$HERE/update_turn_ip.sh
+StandardOutput=append:/var/log/update_turn_ip.log
+StandardError=append:/var/log/update_turn_ip.log
+EOF
+    put /etc/systemd/system/matrix-turn-ip.timer 644 root:root <<'EOF'
+[Unit]
+Description=Check the public IP for coturn/LiveKit every 30 seconds
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=30s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
+EOF
 }
 
 render_all() {
@@ -903,7 +928,7 @@ systemctl restart matrix-synapse
 for _ in $(seq 1 60); do curl -sf http://localhost:8008/health >/dev/null && break; sleep 2; done
 (cd /opt/mas && sudo -u mas MAS_CONFIG=/opt/mas/config.yaml /opt/mas/mas manage register-user "$ADMIN_USER" \
     --password "$ADMIN_PASS" --admin --yes --ignore-password-complexity) || warn "admin user not created"
-systemctl enable --now livekit lk-jwt-service maubot mas-invite coturn nginx
+systemctl enable --now livekit lk-jwt-service maubot mas-invite coturn nginx matrix-turn-ip.timer
 systemctl restart coturn nginx
 
 log "Cron jobs"
@@ -911,7 +936,6 @@ crontab -l 2>/dev/null | grep -v -e refresh_certs.sh -e monitor_services.sh -e u
 cat >> "$WORKDIR/cron" <<EOF
 0 0 * * * $HERE/refresh_certs.sh >> /var/log/refresh_certs.log 2>&1
 */5 * * * * $HERE/monitor_services.sh >> /var/log/matrix_monitor.log 2>&1
-*/15 * * * * $HERE/update_turn_ip.sh >> /var/log/update_turn_ip.log 2>&1
 EOF
 crontab "$WORKDIR/cron"
 [ -f "$HERE/refresh_certs.conf" ] && "$HERE/refresh_certs.sh" || warn "refresh_certs.conf missing - nginx is using a self-signed placeholder cert"

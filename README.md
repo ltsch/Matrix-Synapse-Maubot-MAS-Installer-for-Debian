@@ -45,7 +45,7 @@ Prerequisites (DNS, port forwards, edge proxy config) are in **[docs/INSTALL.md]
 | `lib/common.sh` | Shared download/verify/build helpers | — |
 | `manage_users.py` | User admin via MAS (list/register/lock/deactivate/invite...) | manual |
 | `monitor_services.sh` | Service + endpoint checks, webhook alerts | cron */5 |
-| `update_turn_ip.sh` | Keep coturn/LiveKit public IP current | cron */15 |
+| `update_turn_ip.sh` | Keep coturn/LiveKit public IP current | systemd timer, every 30 s (`matrix-turn-ip.timer`) |
 | `refresh_certs.sh` | Pull TLS cert from the edge, reload nginx/coturn | cron nightly |
 | `backup_matrix.sh` | DB dumps + configs + media, 14-day retention | cron nightly (enable manually) |
 | `mas-invite/invite_gen.py` | Invite-token page served at `/register` | systemd |
