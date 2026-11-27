@@ -22,6 +22,10 @@ systemctl restart <service>
 
 Restart order after config changes that touch both: `mas` → `matrix-synapse` → the rest.
 
+Synapse logs at **INFO** (`root: level: INFO` in `/etc/matrix-synapse/log.yaml`). Raise it to
+`DEBUG` only while chasing a problem, then set it back: DEBUG multiplies the log volume and
+records request details. Restart `matrix-synapse` after changing it.
+
 Scheduled jobs are systemd timers, not cron: `systemctl list-timers 'matrix-*'`. Unit
 details (users, ordering, restart policy, schedules) are in
 [ARCHITECTURE → systemd units](ARCHITECTURE.md#systemd-units).

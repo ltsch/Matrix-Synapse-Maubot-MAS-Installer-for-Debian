@@ -1013,6 +1013,8 @@ chown matrix-synapse:lk-jwt /etc/matrix-synapse/appservices
 install -d -m 750 -o livekit -g livekit /etc/livekit
 install -d -m 750 -o lk-jwt -g lk-jwt /etc/lk-jwt-service
 render_all
+# Synapse logs at INFO (DEBUG fills the disk and records request details); see ADMIN_GUIDE -> Services.
+sed -i -E '/^root:/,/^[^ ]/ s/^(\s+level:) DEBUG$/\1 INFO/' /etc/matrix-synapse/log.yaml
 rm -f /etc/nginx/conf.d/default.conf
 sed -i -e 's/^user .*/user www-data;/' /etc/nginx/nginx.conf
 grep -q 'sites-enabled' /etc/nginx/nginx.conf || sed -i 's|^\(\s*\)include /etc/nginx/conf.d/\*.conf;|&\n\1include /etc/nginx/sites-enabled/*;|' /etc/nginx/nginx.conf
